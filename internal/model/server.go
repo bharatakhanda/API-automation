@@ -13,6 +13,7 @@ const (
 type ServerConnection struct {
 	IPAddress string `json:"ip_address"`
 	SecretKey string `json:"secret_key"`
+	Password  string `json:"-"`
 }
 
 // TestFileSelection captures the local test file source and selection strategy.
