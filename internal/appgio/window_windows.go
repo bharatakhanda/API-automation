@@ -32,6 +32,8 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"github.com/rodrigocfd/windigo/co"
+	"github.com/rodrigocfd/windigo/win"
 )
 
 var palette = struct {
@@ -61,10 +63,13 @@ type Window struct {
 	endpoint, workers, maxCases   widget.Editor
 
 	settingsButton, captureButton, runButton, cancelButton widget.Clickable
+	browseFolderButton, browseFileButton                   widget.Clickable
+	navButtons                                             []widget.Clickable
 	allFilesButton, singleFileButton, randomFileButton     widget.Clickable
 	selectedOnlyButton, allPermButton, pairwiseButton      widget.Clickable
 	modeButtons                                            []widget.Clickable
 
+	activePage    int
 	selectionMode int
 	strategy      combinations.Strategy
 	runModeIndex  int
@@ -104,6 +109,8 @@ func New() *Window {
 	initEditor(&w.serverIP, "")
 	initEditor(&w.secretKey, fiery.DefaultSecretKey)
 	initEditor(&w.password, "")
+	w.secretKey.Mask = '•'
+	w.password.Mask = '•'
 	initEditor(&w.folderPath, "")
 	initEditor(&w.filePath, "")
 	initEditor(&w.endpoint, "/live/api/v5/jobs")
@@ -118,6 +125,8 @@ func initEditor(e *widget.Editor, text string) { e.SingleLine = true; e.Submit =
 func Run() int {
 	code := make(chan int, 1)
 	go func() {
+		_, _ = win.CoInitializeEx(co.COINIT_APARTMENTTHREADED | co.COINIT_DISABLE_OLE1DDE)
+		defer win.CoUninitialize()
 		defer func() {
 			if r := recover(); r != nil {
 				_ = writeCrashReport(fmt.Sprintf("panic: %v", r), debug.Stack())
@@ -157,10 +166,34 @@ func (w *Window) Run() error {
 
 func (w *Window) handleClicks(gtx layout.Context) {
 	for w.captureButton.Clicked(gtx) {
+		w.activePage = 2
 		w.captureCapabilities()
 	}
 	for w.runButton.Clicked(gtx) {
+		w.activePage = 3
 		w.startRun()
+	}
+	for w.browseFolderButton.Clicked(gtx) {
+		if path, err := browsePath(true); err != nil {
+			w.setStatus("Folder selection failed: " + err.Error())
+		} else if path != "" {
+			w.folderPath.SetText(path)
+			w.addLog("Selected test folder: %s", path)
+		}
+	}
+	for w.browseFileButton.Clicked(gtx) {
+		if path, err := browsePath(false); err != nil {
+			w.setStatus("File selection failed: " + err.Error())
+		} else if path != "" {
+			w.filePath.SetText(path)
+			w.selectionMode = 1
+			w.addLog("Selected test file: %s", path)
+		}
+	}
+	for i := range w.navButtons {
+		for w.navButtons[i].Clicked(gtx) {
+			w.activePage = i
+		}
 	}
 	for w.cancelButton.Clicked(gtx) {
 		if w.cancel != nil {
@@ -206,23 +239,39 @@ func (w *Window) layout(gtx layout.Context) layout.Dimensions {
 }
 
 func (w *Window) sidebar(gtx layout.Context) layout.Dimensions {
-	gtx.Constraints.Min.X, gtx.Constraints.Max.X = gtx.Dp(unit.Dp(190)), gtx.Dp(unit.Dp(190))
+	gtx.Constraints.Min.X, gtx.Constraints.Max.X = gtx.Dp(unit.Dp(210)), gtx.Dp(unit.Dp(210))
 	paint.FillShape(gtx.Ops, palette.navy, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	return layout.Inset{Top: unit.Dp(24), Left: unit.Dp(18), Right: unit.Dp(18)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if len(w.navButtons) != 4 {
+			w.navButtons = make([]widget.Clickable, 4)
+		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(label(w.theme, "API Automation", 20, rgb(0xffffff)).Layout),
 			layout.Rigid(spacer(26)),
 			layout.Rigid(label(w.theme, "Workspace", 13, rgb(0x93a4bd)).Layout),
 			layout.Rigid(spacer(14)),
-			layout.Rigid(navItem(w.theme, "Server")), layout.Rigid(navItem(w.theme, "Test files")), layout.Rigid(navItem(w.theme, "Capabilities")), layout.Rigid(navItem(w.theme, "Run history")),
+			layout.Rigid(navButton(w.theme, &w.navButtons[0], "Server settings", w.activePage == 0)),
+			layout.Rigid(navButton(w.theme, &w.navButtons[1], "Test files", w.activePage == 1)),
+			layout.Rigid(navButton(w.theme, &w.navButtons[2], "Capabilities", w.activePage == 2)),
+			layout.Rigid(navButton(w.theme, &w.navButtons[3], "Results & logs", w.activePage == 3)),
 		)
 	})
 }
 
 func (w *Window) content(gtx layout.Context) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(w.header), layout.Rigid(spacer(18)), layout.Rigid(w.settingsCard), layout.Rigid(spacer(14)), layout.Rigid(w.assetsCard), layout.Rigid(spacer(14)), layout.Rigid(w.capabilitiesCard), layout.Rigid(spacer(14)), layout.Rigid(w.resultsCard), layout.Rigid(spacer(20)),
-	)
+	children := []layout.FlexChild{layout.Rigid(w.header), layout.Rigid(spacer(18))}
+	switch w.activePage {
+	case 0:
+		children = append(children, layout.Rigid(w.settingsCard))
+	case 1:
+		children = append(children, layout.Rigid(w.assetsCard))
+	case 2:
+		children = append(children, layout.Rigid(w.capabilitiesCard))
+	default:
+		children = append(children, layout.Rigid(w.resultsCard))
+	}
+	children = append(children, layout.Rigid(spacer(20)))
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
 func (w *Window) header(gtx layout.Context) layout.Dimensions {
@@ -243,11 +292,21 @@ func (w *Window) settingsCard(gtx layout.Context) layout.Dimensions {
 }
 func (w *Window) assetsCard(gtx layout.Context) layout.Dimensions {
 	return card(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(sectionTitle(w.theme, "02 Test assets and run setup")), layout.Rigid(spacer(12)), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return row(gtx, field(w.theme, "Folder path", &w.folderPath, 520), field(w.theme, "Specific file", &w.filePath, 360), field(w.theme, "Workers", &w.workers, 90))
-		}), layout.Rigid(spacer(12)), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return row(gtx, toggle(w.theme, &w.allFilesButton, "All files", w.selectionMode == 0), toggle(w.theme, &w.singleFileButton, "Single file", w.selectionMode == 1), toggle(w.theme, &w.randomFileButton, "Random file", w.selectionMode == 2), field(w.theme, "Endpoint", &w.endpoint, 260))
-		}), layout.Rigid(spacer(12)), layout.Rigid(w.modeSelector))
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(sectionTitle(w.theme, "02 Test assets and run setup")),
+			layout.Rigid(spacer(12)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return row(gtx, field(w.theme, "Folder path", &w.folderPath, 610), secondaryButton(w.theme, &w.browseFolderButton, "Browse folder"), field(w.theme, "Workers", &w.workers, 90))
+			}),
+			layout.Rigid(spacer(12)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return row(gtx, field(w.theme, "Specific file", &w.filePath, 610), secondaryButton(w.theme, &w.browseFileButton, "Browse file"), field(w.theme, "Endpoint", &w.endpoint, 260))
+			}),
+			layout.Rigid(spacer(12)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return row(gtx, toggle(w.theme, &w.allFilesButton, "All files", w.selectionMode == 0), toggle(w.theme, &w.singleFileButton, "Single file", w.selectionMode == 1), toggle(w.theme, &w.randomFileButton, "Random file", w.selectionMode == 2))
+			}),
+			layout.Rigid(spacer(12)), layout.Rigid(w.modeSelector))
 	})
 }
 
@@ -829,6 +888,21 @@ func toggle(th *material.Theme, b *widget.Clickable, text string, active bool) l
 func navItem(th *material.Theme, text string) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, label(th, "› "+text, 15, rgb(0xe2e8f0)).Layout)
+	}
+}
+
+func navButton(th *material.Theme, b *widget.Clickable, text string, active bool) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			btn := material.Button(th, b, "› "+text)
+			btn.Background = rgb(0x1e293b)
+			btn.Color = rgb(0xe2e8f0)
+			if active {
+				btn.Background = palette.primary
+				btn.Color = rgb(0xffffff)
+			}
+			return btn.Layout(gtx)
+		})
 	}
 }
 func spacer(h unit.Dp) layout.Widget {
