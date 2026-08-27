@@ -468,7 +468,7 @@ func (w *Window) startRun() {
 		workers = 1
 	}
 	combos := w.selectedCombinations()
-	w.addLog("Selected %d combination(s) for strategy=%s", len(combos), w.strategy)
+	w.logSelectedCombinations(combos)
 	mode := runModes[w.runModeIndex]
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
@@ -538,6 +538,7 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 	}
 	w.addLog("Imported %s as job %s into queue %s", filepath.Base(file), imp.JobID, mode.ImportQueue)
 	if len(attrs) > 0 {
+		w.addLog("Setting job %s attributes: %s", imp.JobID, formatAttributes(attrs))
 		if err := client.UpdateJobAttributes(ctx, session, imp.JobID, attrs); err != nil {
 			w.addResult(file, "POST", "ERR", time.Since(start), err.Error())
 			return
@@ -554,6 +555,9 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 	}
 	status := "PASS"
 	detail := "set values matched get values"
+	if len(attrs) == 0 {
+		detail = "import/lifecycle completed; no job attributes were selected for set/get verification"
+	}
 	for k, v := range attrs {
 		if got[k] != v {
 			status = "FAIL"
@@ -620,10 +624,16 @@ func (w *Window) fileMode() model.FileSelectionMode {
 	}
 }
 func (w *Window) selectedCombinations() []combinations.Combination {
-	axes := []combinations.Axis{}
-	for _, id := range []string{"PageSize", "EFResolution", "EFColorMode", "EFMediaType", "EFPrintSpeed"} {
+	axes := make([]combinations.Axis, 0, len(w.selected))
+	ids := make([]string, 0, len(w.selected))
+	for id := range w.selected {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
 		vals := selectedValues(w.selected[id])
 		if len(vals) > 0 {
+			sort.Strings(vals)
 			axes = append(axes, combinations.Axis{Name: id, Values: vals})
 		}
 	}
@@ -636,6 +646,37 @@ func (w *Window) selectedCombinations() []combinations.Combination {
 	}
 	return combinations.GenerateWithStrategy(axes, w.strategy, limit)
 }
+
+func (w *Window) logSelectedCombinations(combos []combinations.Combination) {
+	selected := make([]string, 0, len(w.selected))
+	for id, values := range w.selected {
+		vals := selectedValues(values)
+		if len(vals) == 0 {
+			continue
+		}
+		sort.Strings(vals)
+		selected = append(selected, fmt.Sprintf("%s=%v", id, vals))
+	}
+	sort.Strings(selected)
+	if len(selected) == 0 {
+		w.addLog("Selected %d combination(s) for strategy=%s; no job attributes selected, running import/lifecycle only", len(combos), w.strategy)
+		return
+	}
+	w.addLog("Selected %d combination(s) for strategy=%s; axes: %s", len(combos), w.strategy, strings.Join(selected, "; "))
+}
+func formatAttributes(attrs map[string]string) string {
+	keys := make([]string, 0, len(attrs))
+	for key := range attrs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%q", key, attrs[key]))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func sortedKeys(values map[string]string) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
