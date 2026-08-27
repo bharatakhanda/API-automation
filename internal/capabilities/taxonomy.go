@@ -35,6 +35,7 @@ var CanonicalTaxonomy = []struct {
 		{CanonicalID: "EFBrightness", Label: "Brightness", APIKeys: []string{"EFBrightness"}},
 		{CanonicalID: "EFResolution", Label: "Resolution", APIKeys: []string{"EFResolution"}},
 		{CanonicalID: "EFCopies", Label: "Copies", APIKeys: []string{"EFCopies", "num copies"}},
+		{CanonicalID: "EFPrintCover", Label: "Cover page", APIKeys: []string{"EFPrintCover"}},
 		{CanonicalID: "EFRotation", Label: "Rotation", APIKeys: []string{"EFRotateDocument", "EFRotation"}},
 		{CanonicalID: "Scaling", Label: "Scaling", APIKeys: []string{"Scaling", "EFScale"}},
 	}},

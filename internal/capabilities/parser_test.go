@@ -26,8 +26,8 @@ func TestFromSnapshotExtractsServerQueuesAndOptions(t *testing.T) {
 	if option, ok := model.OptionByID("EFResolution"); !ok || len(option.Values) != 2 {
 		t.Fatalf("missing resolution option: %#v", model.Options)
 	}
-	if _, ok := model.OptionByID("Ignored"); ok {
-		t.Fatalf("ignored option should not be exposed")
+	if option, ok := model.OptionByID("Ignored"); !ok || option.Label != "Ignored" {
+		t.Fatalf("all discovered options should be exposed, got %#v", option)
 	}
 	copies, ok := model.OptionByID("num copies")
 	if !ok || copies.Label != "Copies" || len(copies.Values) == 0 {

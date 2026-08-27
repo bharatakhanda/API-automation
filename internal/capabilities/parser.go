@@ -22,6 +22,7 @@ var importantPropertyLabels = map[string]string{
 	"EFOutputBin":               "Output tray",
 	"EFPageDelivery":            "Output delivery",
 	"EFSort":                    "Collate setting",
+	"EFPrintCover":              "Cover page",
 	"EFRotateDocument":          "Rotation angle",
 	"EFOutputCentering":         "Origin",
 	"EFBrightness":              "Brightness",
@@ -126,20 +127,25 @@ func parseProperties(body json.RawMessage) []Option {
 	if json.Unmarshal(body, &payload) != nil {
 		return nil
 	}
-	options := make([]Option, 0, len(importantPropertyLabels))
+	options := make([]Option, 0, len(payload.Data.Items))
 	for _, item := range payload.Data.Items {
-		label, important := importantPropertyLabels[item.ID]
-		if !important {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
 			continue
 		}
+		label := importantPropertyLabels[id]
+		if label == "" {
+			label = id
+		}
 		values := cleanValues(item.Values)
+		value := cleanValue(item.Value)
 		options = append(options, Option{
-			ID:      item.ID,
+			ID:      id,
 			Label:   label,
-			Value:   cleanValue(item.Value),
+			Value:   value,
 			Values:  values,
 			Scopes:  append([]string(nil), item.Scopes...),
-			Enabled: len(values) > 0,
+			Enabled: len(values) > 0 || value != "",
 		})
 	}
 	sort.Slice(options, func(i, j int) bool { return options[i].Label < options[j].Label })

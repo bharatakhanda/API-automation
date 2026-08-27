@@ -624,6 +624,9 @@ func (w *Window) fileMode() model.FileSelectionMode {
 	}
 }
 func (w *Window) selectedCombinations() []combinations.Combination {
+	w.mu.Lock()
+	model := w.capabilities
+	w.mu.Unlock()
 	axes := make([]combinations.Axis, 0, len(w.selected))
 	ids := make([]string, 0, len(w.selected))
 	for id := range w.selected {
@@ -632,10 +635,19 @@ func (w *Window) selectedCombinations() []combinations.Combination {
 	sort.Strings(ids)
 	for _, id := range ids {
 		vals := selectedValues(w.selected[id])
-		if len(vals) > 0 {
-			sort.Strings(vals)
-			axes = append(axes, combinations.Axis{Name: id, Values: vals})
+		if len(vals) == 0 {
+			continue
 		}
+		if w.strategy != combinations.StrategySelected {
+			if option, ok := model.OptionByID(id); ok {
+				allValues := optionValues(option)
+				if len(allValues) > len(vals) {
+					vals = allValues
+				}
+			}
+		}
+		sort.Strings(vals)
+		axes = append(axes, combinations.Axis{Name: id, Values: vals})
 	}
 	if len(axes) == 0 {
 		return []combinations.Combination{{}}
@@ -649,10 +661,18 @@ func (w *Window) selectedCombinations() []combinations.Combination {
 
 func (w *Window) logSelectedCombinations(combos []combinations.Combination) {
 	selected := make([]string, 0, len(w.selected))
+	w.mu.Lock()
+	model := w.capabilities
+	w.mu.Unlock()
 	for id, values := range w.selected {
 		vals := selectedValues(values)
 		if len(vals) == 0 {
 			continue
+		}
+		if w.strategy != combinations.StrategySelected {
+			if option, ok := model.OptionByID(id); ok && len(optionValues(option)) > len(vals) {
+				vals = optionValues(option)
+			}
 		}
 		sort.Strings(vals)
 		selected = append(selected, fmt.Sprintf("%s=%v", id, vals))
