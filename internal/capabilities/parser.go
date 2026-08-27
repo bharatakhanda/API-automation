@@ -16,6 +16,7 @@ var importantPropertyLabels = map[string]string{
 	"EFColorMode":      "Color mode",
 	"EFResolution":     "Resolution",
 	"EFPrintSpeed":     "Print speed",
+	"EFCopies":         "Copies",
 	"InputSlot":        "Input slot",
 	"EFOutputBin":      "Output bin",
 	"EFRotateDocument": "Rotation",
@@ -23,6 +24,8 @@ var importantPropertyLabels = map[string]string{
 	"EFTextGfxQual":    "Text/graphics quality",
 	"EFEdgeDropSize":   "Edge drop size",
 	"EFRaster":         "Raster mode",
+	"EFFineLineRendering": "Fine line rendering",
+	"EFImageSmooth":    "Image smoothing",
 }
 
 func FromSnapshot(snapshot fiery.CapabilitySnapshot) Model {
