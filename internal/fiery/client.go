@@ -213,6 +213,33 @@ func (c *Client) ImportJob(ctx context.Context, session Session, filePath string
 	return result, nil
 }
 
+func (c *Client) GetJobAttributes(ctx context.Context, session Session, jobID string) (map[string]string, error) {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return nil, errors.New("job ID is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+apiV5+"/jobs/"+url.PathEscape(jobID), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Cookie", session.Cookie)
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("get job failed with HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	attrs := extractJobAttributes(body)
+	if len(attrs) == 0 {
+		return nil, errors.New("job response did not contain readable attributes")
+	}
+	return attrs, nil
+}
+
 func (c *Client) UpdateJobAttributes(ctx context.Context, session Session, jobID string, attributes map[string]string) error {
 	jobID = strings.TrimSpace(jobID)
 	if jobID == "" {
@@ -264,6 +291,30 @@ func (c *Client) JobAction(ctx context.Context, session Session, jobID, action s
 		return fmt.Errorf("job action %q failed with HTTP %d", action, resp.StatusCode)
 	}
 	return nil
+}
+
+func extractJobAttributes(body []byte) map[string]string {
+	var payload struct {
+		Data struct {
+			Item map[string]any `json:"item"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || len(payload.Data.Item) == 0 {
+		var direct struct {
+			Data struct {
+				Items []map[string]any `json:"items"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(body, &direct) != nil || len(direct.Data.Items) == 0 {
+			return nil
+		}
+		payload.Data.Item = direct.Data.Items[0]
+	}
+	attrs := make(map[string]string, len(payload.Data.Item))
+	for key, value := range payload.Data.Item {
+		attrs[key] = strings.TrimSpace(fmt.Sprint(value))
+	}
+	return attrs
 }
 
 func extractJobID(body []byte) string {

@@ -31,11 +31,16 @@ func TestLoginAndImportJob(t *testing.T) {
 			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
 			_, _ = w.Write([]byte(`{"data":{"item":{"authenticated":true}}}`))
 		case apiV5 + "/jobs/JOB-123":
-			sawUpdate = true
-			if r.Method != http.MethodPost {
-				t.Fatalf("update method = %s", r.Method)
+			if r.Method == http.MethodPost {
+				sawUpdate = true
+				_, _ = w.Write([]byte(`{"ok":true}`))
+				return
 			}
-			_, _ = w.Write([]byte(`{"ok":true}`))
+			if r.Method == http.MethodGet {
+				_, _ = w.Write([]byte(`{"data":{"item":{"id":"JOB-123","EFResolution":"360x720dpi"}}}`))
+				return
+			}
+			t.Fatalf("job method = %s", r.Method)
 		case apiV5 + "/jobs":
 			sawImport = true
 			if got := r.Header.Get("Cookie"); got != "session=abc" {
@@ -76,6 +81,13 @@ func TestLoginAndImportJob(t *testing.T) {
 	}
 	if err := client.UpdateJobAttributes(context.Background(), session, result.JobID, map[string]string{"EFResolution": "360x720dpi"}); err != nil {
 		t.Fatal(err)
+	}
+	attrs, err := client.GetJobAttributes(context.Background(), session, result.JobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attrs["EFResolution"] != "360x720dpi" {
+		t.Fatalf("EFResolution = %q", attrs["EFResolution"])
 	}
 	if !sawLogin || !sawImport || !sawUpdate {
 		t.Fatalf("sawLogin=%v sawImport=%v sawUpdate=%v", sawLogin, sawImport, sawUpdate)
