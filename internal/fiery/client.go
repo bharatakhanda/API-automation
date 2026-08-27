@@ -235,11 +235,23 @@ func (c *Client) importJobToQueue(ctx context.Context, session Session, filePath
 }
 
 func (c *Client) GetJobAttributes(ctx context.Context, session Session, jobID string) (map[string]string, error) {
+	attrs, err := c.getJobAttributes(ctx, session, apiV5, jobID)
+	if err == nil {
+		return attrs, nil
+	}
+	fallbackAttrs, fallbackErr := c.getJobAttributes(ctx, session, apiV4, jobID)
+	if fallbackErr == nil {
+		return fallbackAttrs, nil
+	}
+	return nil, fmt.Errorf("v5 get job attributes failed: %w; v4 get job attributes failed: %w", err, fallbackErr)
+}
+
+func (c *Client) getJobAttributes(ctx context.Context, session Session, apiPath, jobID string) (map[string]string, error) {
 	jobID = strings.TrimSpace(jobID)
 	if jobID == "" {
 		return nil, errors.New("job ID is required")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+apiV5+"/jobs/"+url.PathEscape(jobID), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+apiPath+"/jobs/"+url.PathEscape(jobID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -252,11 +264,11 @@ func (c *Client) GetJobAttributes(ctx context.Context, session Session, jobID st
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("get job failed with HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("get job %s/jobs/%s failed with HTTP %d: %s", apiPath, jobID, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	attrs := extractJobAttributes(body)
 	if len(attrs) == 0 {
-		return nil, errors.New("job response did not contain readable attributes")
+		return nil, fmt.Errorf("job response from %s/jobs/%s did not contain readable attributes; body=%s", apiPath, jobID, truncateForError(body, 4096))
 	}
 	return attrs, nil
 }
@@ -388,31 +400,56 @@ func extractJobAttributes(body []byte) map[string]string {
 }
 
 func collectJobAttributes(out map[string]string, item map[string]any) {
-	for key, value := range item {
-		switch key {
-		case "attributes":
-			collectAnyMap(out, value)
-		case "job":
-			if nested, ok := asStringAnyMap(value); ok {
-				collectJobAttributes(out, nested)
-			}
-		default:
-			if _, isNested := value.(map[string]any); isNested {
+	collectAttributeTree(out, item)
+}
+
+func collectAttributeTree(out map[string]string, value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, raw := range typed {
+			if key == "job" || key == "attributes" {
+				collectAttributeTree(out, raw)
 				continue
 			}
-			out[key] = normalizeAttributeValue(value)
+			if scalarAttribute(raw) {
+				out[key] = normalizeAttributeValue(raw)
+				continue
+			}
+			if wrappedAttributeValue(raw) {
+				out[key] = normalizeAttributeValue(raw)
+				continue
+			}
+			collectAttributeTree(out, raw)
+		}
+	case []any:
+		for _, item := range typed {
+			collectAttributeTree(out, item)
 		}
 	}
 }
 
-func collectAnyMap(out map[string]string, value any) {
-	attrs, ok := asStringAnyMap(value)
+func scalarAttribute(value any) bool {
+	switch value.(type) {
+	case nil, string, bool, float64, int, int64, json.Number:
+		return true
+	default:
+		return false
+	}
+}
+
+func wrappedAttributeValue(value any) bool {
+	m, ok := value.(map[string]any)
 	if !ok {
-		return
+		return false
 	}
-	for key, raw := range attrs {
-		out[key] = normalizeAttributeValue(raw)
-	}
+	_, hasValue := m["value"]
+	_, hasName := m["name"]
+	_, hasID := m["id"]
+	return hasValue || hasName || hasID
+}
+
+func collectAnyMap(out map[string]string, value any) {
+	collectAttributeTree(out, value)
 }
 
 func asStringAnyMap(value any) (map[string]any, bool) {
@@ -420,6 +457,14 @@ func asStringAnyMap(value any) (map[string]any, bool) {
 		return typed, true
 	}
 	return nil, false
+}
+
+func truncateForError(body []byte, max int) string {
+	text := strings.TrimSpace(string(body))
+	if len(text) <= max {
+		return text
+	}
+	return text[:max] + "..."
 }
 
 func normalizeAttributeValue(value any) string {

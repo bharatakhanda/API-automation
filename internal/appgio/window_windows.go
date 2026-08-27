@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -505,7 +506,7 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 	for k, v := range attrs {
 		if got[k] != v {
 			status = "FAIL"
-			detail = fmt.Sprintf("%s set=%q got=%q", k, v, got[k])
+			detail = fmt.Sprintf("%s set=%q got=%q availableKeys=%s", k, v, got[k], short(strings.Join(sortedKeys(got), ","), 220))
 			break
 		}
 	}
@@ -581,6 +582,15 @@ func (w *Window) selectedCombinations() []combinations.Combination {
 	}
 	return combinations.GenerateWithStrategy(axes, w.strategy, limit)
 }
+func sortedKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func selectedValues(m map[string]*widget.Bool) []string {
 	var vals []string
 	for v, b := range m {
