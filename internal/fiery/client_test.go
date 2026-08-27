@@ -71,7 +71,9 @@ func TestLoginAndImportJob(t *testing.T) {
 			}
 			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
 			_, _ = w.Write([]byte(`{"data":{"item":{"authenticated":true}}}`))
-		case apiV5 + "/jobs/JOB-123":
+		case apiV4 + "/jobs/JOB-123/attributes", apiV5 + "/jobs/JOB-123/attributes", apiV4 + "/jobs/JOB-123/properties", apiV5 + "/jobs/JOB-123/properties":
+			http.NotFound(w, r)
+		case apiV4 + "/jobs/JOB-123", apiV5 + "/jobs/JOB-123":
 			if r.Method == http.MethodPost {
 				sawUpdate = true
 				_, _ = w.Write([]byte(`{"ok":true}`))

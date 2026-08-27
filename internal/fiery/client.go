@@ -235,23 +235,35 @@ func (c *Client) importJobToQueue(ctx context.Context, session Session, filePath
 }
 
 func (c *Client) GetJobAttributes(ctx context.Context, session Session, jobID string) (map[string]string, error) {
-	attrs, err := c.getJobAttributes(ctx, session, apiV5, jobID)
-	if err == nil {
-		return attrs, nil
-	}
-	fallbackAttrs, fallbackErr := c.getJobAttributes(ctx, session, apiV4, jobID)
-	if fallbackErr == nil {
-		return fallbackAttrs, nil
-	}
-	return nil, fmt.Errorf("v5 get job attributes failed: %w; v4 get job attributes failed: %w", err, fallbackErr)
-}
-
-func (c *Client) getJobAttributes(ctx context.Context, session Session, apiPath, jobID string) (map[string]string, error) {
 	jobID = strings.TrimSpace(jobID)
 	if jobID == "" {
 		return nil, errors.New("job ID is required")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+apiPath+"/jobs/"+url.PathEscape(jobID), nil)
+	merged := map[string]string{}
+	var failures []string
+	for _, apiPath := range []string{apiV4, apiV5} {
+		for _, suffix := range []string{"", "/attributes", "/properties"} {
+			attrs, err := c.getJobAttributesAt(ctx, session, apiPath, jobID, suffix)
+			if err != nil {
+				failures = append(failures, err.Error())
+				continue
+			}
+			for key, value := range attrs {
+				if _, exists := merged[key]; !exists || merged[key] == "" {
+					merged[key] = value
+				}
+			}
+		}
+	}
+	if len(merged) == 0 {
+		return nil, fmt.Errorf("job response did not contain readable attributes; attempts: %s", strings.Join(failures, " | "))
+	}
+	return merged, nil
+}
+
+func (c *Client) getJobAttributesAt(ctx context.Context, session Session, apiPath, jobID, suffix string) (map[string]string, error) {
+	endpoint := c.baseURL + apiPath + "/jobs/" + url.PathEscape(jobID) + suffix
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -264,20 +276,20 @@ func (c *Client) getJobAttributes(ctx context.Context, session Session, apiPath,
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("get job %s/jobs/%s failed with HTTP %d: %s", apiPath, jobID, resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("get job %s/jobs/%s%s failed with HTTP %d: %s", apiPath, jobID, suffix, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	attrs := extractJobAttributes(body)
 	if len(attrs) == 0 {
-		return nil, fmt.Errorf("job response from %s/jobs/%s did not contain readable attributes; body=%s", apiPath, jobID, truncateForError(body, 4096))
+		return nil, fmt.Errorf("job response from %s/jobs/%s%s did not contain readable attributes; body=%s", apiPath, jobID, suffix, truncateForError(body, 2048))
 	}
 	return attrs, nil
 }
 
 func (c *Client) UpdateJobAttributes(ctx context.Context, session Session, jobID string, attributes map[string]string) error {
-	if err := c.updateJobAttributes(ctx, session, apiV5, jobID, attributes); err == nil {
+	if err := c.updateJobAttributes(ctx, session, apiV4, jobID, attributes); err == nil {
 		return nil
-	} else if fallbackErr := c.updateJobAttributes(ctx, session, apiV4, jobID, attributes); fallbackErr != nil {
-		return fmt.Errorf("v5 job attribute update failed: %w; v4 job attribute update failed: %w", err, fallbackErr)
+	} else if fallbackErr := c.updateJobAttributes(ctx, session, apiV5, jobID, attributes); fallbackErr != nil {
+		return fmt.Errorf("v4 job attribute update failed: %w; v5 job attribute update failed: %w", err, fallbackErr)
 	}
 	return nil
 }
@@ -341,10 +353,10 @@ func (c *Client) WaitJobAttribute(ctx context.Context, session Session, jobID, k
 }
 
 func (c *Client) JobAction(ctx context.Context, session Session, jobID, action string) error {
-	if err := c.jobAction(ctx, session, apiV5, jobID, action); err == nil {
+	if err := c.jobAction(ctx, session, apiV4, jobID, action); err == nil {
 		return nil
-	} else if fallbackErr := c.jobAction(ctx, session, apiV4, jobID, action); fallbackErr != nil {
-		return fmt.Errorf("v5 job action failed: %w; v4 job action failed: %w", err, fallbackErr)
+	} else if fallbackErr := c.jobAction(ctx, session, apiV5, jobID, action); fallbackErr != nil {
+		return fmt.Errorf("v4 job action failed: %w; v5 job action failed: %w", err, fallbackErr)
 	}
 	return nil
 }

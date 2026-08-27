@@ -673,7 +673,7 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		w.addResult(file, "POST", "ERR", time.Since(start), err.Error())
 		return
 	}
-	got, err := client.GetJobAttributes(ctx, session, imp.JobID)
+	got, err := w.readBackAttributes(ctx, client, session, imp.JobID, attrs)
 	if err != nil {
 		w.addResult(file, "GET", "ERR", time.Since(start), err.Error())
 		return
@@ -691,6 +691,35 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		}
 	}
 	w.addResult(file, http.MethodPost, status, time.Since(start), detail)
+}
+
+func (w *Window) readBackAttributes(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, expected map[string]string) (map[string]string, error) {
+	var got map[string]string
+	var err error
+	for attempt := 1; attempt <= 4; attempt++ {
+		got, err = client.GetJobAttributes(ctx, session, jobID)
+		if err != nil {
+			return nil, err
+		}
+		if attributesPresent(got, expected) {
+			return got, nil
+		}
+		select {
+		case <-ctx.Done():
+			return got, ctx.Err()
+		case <-time.After(750 * time.Millisecond):
+		}
+	}
+	return got, nil
+}
+
+func attributesPresent(got, expected map[string]string) bool {
+	for key := range expected {
+		if _, ok := got[key]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (w *Window) performModeLifecycle(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, mode runMode) error {
