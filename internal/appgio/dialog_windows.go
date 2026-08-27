@@ -10,6 +10,8 @@ import (
 )
 
 func browsePath(folder bool) (string, error) {
+	_, _ = win.CoInitializeEx(co.COINIT_APARTMENTTHREADED | co.COINIT_DISABLE_OLE1DDE)
+	defer win.CoUninitialize()
 	releaser := win.NewOleReleaser()
 	defer releaser.Release()
 	var dialog *win.IFileOpenDialog

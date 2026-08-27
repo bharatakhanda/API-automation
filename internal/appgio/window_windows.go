@@ -709,7 +709,13 @@ func (w *Window) selectedCombinations() []combinations.Combination {
 		axes = append(axes, combinations.Axis{Name: id, Values: vals})
 	}
 	if len(axes) == 0 {
-		return []combinations.Combination{{}}
+		if w.strategy == combinations.StrategySelected {
+			return []combinations.Combination{{}}
+		}
+		axes = defaultPermutationAxes(model)
+		if len(axes) == 0 {
+			return []combinations.Combination{{}}
+		}
 	}
 	limit, _ := strconv.Atoi(strings.TrimSpace(w.maxCases.Text()))
 	if limit < 1 {
@@ -738,11 +744,59 @@ func (w *Window) logSelectedCombinations(combos []combinations.Combination) {
 	}
 	sort.Strings(selected)
 	if len(selected) == 0 {
-		w.addLog("Selected %d combination(s) for strategy=%s; no job attributes selected, running import/lifecycle only", len(combos), w.strategy)
-		return
+		if w.strategy == combinations.StrategySelected {
+			w.addLog("Selected %d combination(s) for strategy=%s; no job attributes selected, running import/lifecycle only", len(combos), w.strategy)
+			return
+		}
+		axes := defaultPermutationAxes(model)
+		for _, axis := range axes {
+			selected = append(selected, fmt.Sprintf("%s=%v", axis.Name, axis.Values))
+		}
+		w.addLog("Selected %d combination(s) for strategy=%s; no checkbox axes selected, using default discovered permutation axes", len(combos), w.strategy)
 	}
 	w.addLog("Selected %d combination(s) for strategy=%s; axes: %s", len(combos), w.strategy, strings.Join(selected, "; "))
 }
+func defaultPermutationAxes(model capabilities.Model) []combinations.Axis {
+	preferred := []string{"EFResolution", "EFColorMode", "EFMediaType", "EFPrintSpeed", "PageSize", "num copies", "EFBrightness", "EFPrintCover", "EFOutputBin"}
+	axes := make([]combinations.Axis, 0, len(preferred))
+	seen := map[string]struct{}{}
+	for _, id := range preferred {
+		if opt, ok := model.OptionByID(id); ok {
+			vals := optionValues(opt)
+			if len(vals) > 1 {
+				axes = append(axes, combinations.Axis{Name: opt.ID, Values: vals})
+				seen[opt.ID] = struct{}{}
+			}
+		}
+	}
+	if len(axes) > 0 {
+		return axes
+	}
+	for _, opt := range model.Options {
+		if _, ok := seen[opt.ID]; ok {
+			continue
+		}
+		vals := optionValues(opt)
+		if len(vals) > 1 && len(vals) <= 12 && isLikelyJobAttribute(opt) {
+			axes = append(axes, combinations.Axis{Name: opt.ID, Values: vals})
+		}
+		if len(axes) >= 8 {
+			break
+		}
+	}
+	return axes
+}
+
+func isLikelyJobAttribute(opt capabilities.Option) bool {
+	for _, scope := range opt.Scopes {
+		s := strings.ToLower(scope)
+		if s == "command" || s == "ps" || s == "appe" || s == "uimenu" || strings.HasPrefix(s, "fp") {
+			return true
+		}
+	}
+	return false
+}
+
 func formatAttributes(attrs map[string]string) string {
 	keys := make([]string, 0, len(attrs))
 	for key := range attrs {
