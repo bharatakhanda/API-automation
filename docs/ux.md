@@ -16,9 +16,11 @@ API Automation should feel like a modern enterprise operations tool, not a toy r
 The initial shell uses:
 
 - left-side workspace navigation,
+- server connection inputs for IP address and secret key,
+- test folder and file selection controls,
 - request builder header area,
 - primary Run/Cancel actions,
 - full-row execution result grid,
 - persistent activity log.
 
-Future UI increments should add collections, environments, variables, assertions, and run history without breaking this layout model.
+Future UI increments should add collections, environments, variables, assertions, and run history without breaking this layout model. Server credentials and test asset selection should remain prominent because they are prerequisites for execution.

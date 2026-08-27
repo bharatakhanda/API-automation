@@ -74,3 +74,30 @@ The product is an API automation tool, not only a simple REST client. Planned ca
 - execution history,
 - logs and diagnostics,
 - and stable desktop UX for professional use.
+
+## Server execution requirements
+
+The application connects to a server before automation can run.
+
+Required user-provided connection inputs:
+
+- server IP address,
+- secret key.
+
+Required test asset inputs:
+
+- a local folder containing test files,
+- a file selection strategy.
+
+Supported file selection strategies:
+
+- **All files**: every regular file in the selected folder is eligible for execution.
+- **Single file**: the user selects one specific file, and it must be inside the selected folder.
+- **Random file**: the application chooses one eligible file from the selected folder.
+
+Rules:
+
+- Automation must not start without a server IP address and secret key.
+- Automation must not start without a valid test folder.
+- Random selection is owned by the application, not the user.
+- File selection logic must remain testable outside the UI.
