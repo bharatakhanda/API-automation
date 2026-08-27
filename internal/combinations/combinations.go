@@ -67,29 +67,86 @@ func cartesian(axes []Axis, limit int) []Combination {
 	return out
 }
 
-// pairwise creates a compact deterministic sample that covers each neighboring
-// pair of capability values. It is intentionally conservative for desktop runs.
+// pairwise creates a deterministic greedy pairwise sample. It covers every
+// value pair across every two axes when the supplied limit is large enough.
 func pairwise(axes []Axis, limit int) []Combination {
 	axes = normalizeAxes(axes)
 	if len(axes) == 0 || limit == 0 {
 		return nil
 	}
-	maxLen := 0
-	for _, axis := range axes {
-		if len(axis.Values) > maxLen {
-			maxLen = len(axis.Values)
+	if len(axes) == 1 {
+		return cartesian(axes, limit)
+	}
+	uncovered := allPairs(axes)
+	if len(uncovered) == 0 {
+		return nil
+	}
+
+	candidates := cartesian(axes, -1)
+	out := make([]Combination, 0)
+	used := map[int]struct{}{}
+	for len(uncovered) > 0 && (limit < 0 || len(out) < limit) {
+		bestIdx := -1
+		bestCovered := 0
+		var bestPairs []string
+		for idx, candidate := range candidates {
+			if _, ok := used[idx]; ok {
+				continue
+			}
+			pairs := coveredPairs(candidate, axes, uncovered)
+			if len(pairs) > bestCovered {
+				bestIdx = idx
+				bestCovered = len(pairs)
+				bestPairs = pairs
+			}
+		}
+		if bestIdx < 0 || bestCovered == 0 {
+			break
+		}
+		used[bestIdx] = struct{}{}
+		out = append(out, cloneCombination(candidates[bestIdx]))
+		for _, pair := range bestPairs {
+			delete(uncovered, pair)
 		}
 	}
-	if limit > 0 && maxLen > limit {
-		maxLen = limit
-	}
-	out := make([]Combination, 0, maxLen)
-	for i := 0; i < maxLen; i++ {
-		combo := Combination{}
-		for axisIdx, axis := range axes {
-			combo[axis.Name] = axis.Values[(i+axisIdx)%len(axis.Values)]
+	return out
+}
+
+func allPairs(axes []Axis) map[string]struct{} {
+	pairs := map[string]struct{}{}
+	for i := 0; i < len(axes); i++ {
+		for j := i + 1; j < len(axes); j++ {
+			for _, left := range axes[i].Values {
+				for _, right := range axes[j].Values {
+					pairs[pairKey(axes[i].Name, left, axes[j].Name, right)] = struct{}{}
+				}
+			}
 		}
-		out = append(out, combo)
+	}
+	return pairs
+}
+
+func coveredPairs(combo Combination, axes []Axis, uncovered map[string]struct{}) []string {
+	pairs := make([]string, 0)
+	for i := 0; i < len(axes); i++ {
+		for j := i + 1; j < len(axes); j++ {
+			key := pairKey(axes[i].Name, combo[axes[i].Name], axes[j].Name, combo[axes[j].Name])
+			if _, ok := uncovered[key]; ok {
+				pairs = append(pairs, key)
+			}
+		}
+	}
+	return pairs
+}
+
+func pairKey(leftName, leftValue, rightName, rightValue string) string {
+	return leftName + "=" + leftValue + "\x00" + rightName + "=" + rightValue
+}
+
+func cloneCombination(in Combination) Combination {
+	out := make(Combination, len(in))
+	for key, value := range in {
+		out[key] = value
 	}
 	return out
 }
