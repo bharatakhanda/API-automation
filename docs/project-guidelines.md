@@ -110,6 +110,7 @@ The temporary `DATA/` folder is reference-only and must never be committed. It c
 Useful behavior incorporated into the Go application:
 
 - Fiery server base URL: `https://{server}`.
+- Use only Fiery API v5 for newly implemented server calls.
 - Login endpoint: `POST /live/api/v5/login`.
 - Login payload uses `username`, `password`, and `accessrights` where `accessrights` maps to the user-provided secret key.
 - Do not hardcode credentials from the temporary `DATA/` folder into source code.
@@ -118,11 +119,13 @@ Useful behavior incorporated into the Go application:
 - Import form fields:
   - `file`: selected test file.
   - `queue`: `hold`.
-- Keep-alive/status check uses `GET /live/api/v4/info`.
+- Keep-alive/status check uses `GET /live/api/v5/status`.
+- Capability capture saves snapshots next to the EXE under `captures/server-capabilities-snapshot-YYYYMMDD-HHMMSS.json`.
+- Snapshot files must not include the secret key, password, or session cookie.
 - Fiery installations may use self-signed certificates, so the server client supports controlled insecure TLS for this environment.
-- Job operation endpoints available for future workflow steps:
-  - `PUT /live/api/v4/jobs/{jobId}/rip`
-  - `PUT /live/api/v4/jobs/{jobId}/press_print`
-  - `PUT /live/api/v4/jobs/{jobId}/print`
-  - `DELETE /live/api/v4/jobs/{jobId}`
-  - `POST /live/api/v4/jobs/{jobId}` for attribute updates.
+- Job operation endpoints available for future workflow steps should use v5 paths, for example:
+  - `PUT /live/api/v5/jobs/{jobId}/rip`
+  - `PUT /live/api/v5/jobs/{jobId}/press_print`
+  - `PUT /live/api/v5/jobs/{jobId}/print`
+  - `DELETE /live/api/v5/jobs/{jobId}`
+  - `POST /live/api/v5/jobs/{jobId}` for attribute updates.
