@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -73,11 +74,21 @@ type MainWindow struct {
 	cancel         context.CancelFunc
 	running        atomic.Bool
 	closeRequested atomic.Bool
+	diagnostic     *diagnosticLog
 }
 
-func Run() int {
+func Run() (exitCode int) {
 	_, _ = win.CoInitializeEx(co.COINIT_APARTMENTTHREADED | co.COINIT_DISABLE_OLE1DDE)
 	defer win.CoUninitialize()
+
+	diagnostic := newDiagnosticLog()
+	defer diagnostic.close()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			diagnostic.printf("PANIC: %v\n%s", recovered, debug.Stack())
+			exitCode = 1
+		}
+	}()
 
 	wnd := ui.NewMain(ui.OptsMain().Title("API Automation").Size(ui.Dpi(windowWidth, windowHeight)))
 
@@ -190,8 +201,9 @@ func Run() int {
 		CtrlStyle(co.ES_MULTILINE|co.ES_AUTOVSCROLL|co.ES_READONLY|co.ES_WANTRETURN).
 		WndStyle(co.WS_CHILD|co.WS_VISIBLE|co.WS_VSCROLL|co.WS_TABSTOP))
 
-	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, queue: queue, pageSize: pageSize, resolution: resolution, colorMode: colorMode, mediaType: mediaType, printSpeed: printSpeed, multiSelects: multiSelects, multiSelectValues: map[string][]string{}, runMode: runMode, strategy: strategy, maxCases: maxCases, concurrency: concurrency, runButton: runButton, captureButton: captureButton, settingsButton: settingsButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status, progress: progress, settingsCtrls: settingsCtrls, workspaceCtrls: workspaceCtrls, capabilityCtrls: capabilityCtrls}
+	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, queue: queue, pageSize: pageSize, resolution: resolution, colorMode: colorMode, mediaType: mediaType, printSpeed: printSpeed, multiSelects: multiSelects, multiSelectValues: map[string][]string{}, runMode: runMode, strategy: strategy, maxCases: maxCases, concurrency: concurrency, runButton: runButton, captureButton: captureButton, settingsButton: settingsButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status, progress: progress, settingsCtrls: settingsCtrls, workspaceCtrls: workspaceCtrls, capabilityCtrls: capabilityCtrls, diagnostic: diagnostic}
 	mw.events()
+	diagnostic.printf("Application started. Diagnostic log: %s", diagnostic.path)
 	return wnd.RunAsMain()
 }
 
@@ -272,6 +284,7 @@ func (m *MainWindow) events() {
 
 func (m *MainWindow) destroyWindow() {
 	m.theme.dispose()
+	m.diagnostic.close()
 	_ = m.wnd.Hwnd().DestroyWindow()
 }
 
@@ -933,10 +946,14 @@ func browsePath(owner win.HWND, folder bool) (string, error) {
 	return path, nil
 }
 
-func (m *MainWindow) setStatus(text string) { m.status.Hwnd().SetWindowText(text) }
+func (m *MainWindow) setStatus(text string) {
+	m.status.Hwnd().SetWindowText(text)
+	m.diagnostic.printf("STATUS: %s", text)
+}
 
 func (m *MainWindow) appendLog(format string, args ...any) {
 	line := fmt.Sprintf(format, args...)
+	m.diagnostic.printf("UI: %s", line)
 	current := m.log.Text()
 	if current != "" {
 		current += "\r\n"

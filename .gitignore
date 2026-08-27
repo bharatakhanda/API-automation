@@ -4,6 +4,7 @@ DATA/
 server-capabilities-snapshot-*.json
 EnvironmentSnapshot-*.json
 captures/
+logs/
 *.exe
 *.test
 *.out
