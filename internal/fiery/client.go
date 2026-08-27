@@ -20,7 +20,6 @@ import (
 const (
 	DefaultUsername = "admin"
 	apiV5           = "/live/api/v5"
-	apiV4           = "/live/api/v4"
 )
 
 // Config describes the Fiery server connection learned from the reference DATA implementation.
@@ -132,7 +131,7 @@ func (c *Client) Login(ctx context.Context) (Session, error) {
 }
 
 func (c *Client) KeepAlive(ctx context.Context, session Session) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+apiV4+"/info", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+apiV5+"/status", nil)
 	if err != nil {
 		return err
 	}
@@ -199,7 +198,7 @@ func (c *Client) JobAction(ctx context.Context, session Session, jobID, action s
 	if jobID == "" || action == "" {
 		return errors.New("job ID and action are required")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+apiV4+"/jobs/"+url.PathEscape(jobID)+"/"+action, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+apiV5+"/jobs/"+url.PathEscape(jobID)+"/"+action, nil)
 	if err != nil {
 		return err
 	}
