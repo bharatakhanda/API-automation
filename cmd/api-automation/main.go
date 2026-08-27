@@ -1,12 +1,11 @@
 package main
 
 import (
-	"runtime"
+	"os"
 
-	"api-automation/internal/app"
+	"api-automation/internal/appgio"
 )
 
 func main() {
-	runtime.LockOSThread() // Win32 GUI must live on one OS thread.
-	app.Run()
+	os.Exit(appgio.Run())
 }
