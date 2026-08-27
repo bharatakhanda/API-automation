@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -35,6 +36,7 @@ type MainWindow struct {
 	method        *ui.Edit
 	concurrency   *ui.Edit
 	runButton     *ui.Button
+	captureButton *ui.Button
 	cancelButton  *ui.Button
 	browseFolder  *ui.Button
 	browseFile    *ui.Button
@@ -63,6 +65,7 @@ func Run() int {
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Server Execution Workspace").Position(ui.Dpi(220, 18)).Size(ui.Dpi(300, 24)))
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Connect securely, choose test assets, and execute API automation against the server.").Position(ui.Dpi(220, 48)).Size(ui.Dpi(720, 22)))
 
+	captureButton := ui.NewButton(wnd, ui.OptsButton().Text("Capture &capabilities").Position(ui.Dpi(778, 24)).Width(ui.DpiX(170)).Height(ui.DpiY(28)))
 	runButton := ui.NewButton(wnd, ui.OptsButton().Text("&Run automation").Position(ui.Dpi(960, 24)).Width(ui.DpiX(132)).Height(ui.DpiY(28)))
 	cancelButton := ui.NewButton(wnd, ui.OptsButton().Text("&Cancel").Position(ui.Dpi(1104, 24)).Width(ui.DpiX(92)).Height(ui.DpiY(28)))
 
@@ -106,13 +109,14 @@ func Run() int {
 		CtrlStyle(co.ES_MULTILINE|co.ES_AUTOVSCROLL|co.ES_READONLY|co.ES_WANTRETURN).
 		WndStyle(co.WS_CHILD|co.WS_VISIBLE|co.WS_VSCROLL|co.WS_TABSTOP))
 
-	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, concurrency: concurrency, runButton: runButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status}
+	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, concurrency: concurrency, runButton: runButton, captureButton: captureButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status}
 	mw.events()
 	return wnd.RunAsMain()
 }
 
 func (m *MainWindow) events() {
 	m.runButton.On().BnClicked(func() { m.startRun() })
+	m.captureButton.On().BnClicked(func() { m.captureCapabilities() })
 	m.cancelButton.On().BnClicked(func() { m.cancelRun() })
 	m.browseFolder.On().BnClicked(func() {
 		path, err := browsePath(m.wnd.Hwnd(), true)
@@ -144,14 +148,8 @@ func (m *MainWindow) startRun() {
 	if m.running.Load() {
 		return
 	}
-	server := model.ServerConnection{
-		IPAddress: strings.TrimSpace(m.serverIP.Text()),
-		SecretKey: strings.TrimSpace(m.secretKey.Text()),
-		Password:  strings.TrimSpace(m.password.Text()),
-	}
-	if server.IPAddress == "" || server.SecretKey == "" || server.Password == "" {
-		m.setStatus("Server IP address, secret key, and admin password are required.")
-		m.appendLog("Validation failed: server IP address, secret key, and admin password are required")
+	server, ok := m.serverConnection()
+	if !ok {
 		return
 	}
 
@@ -184,11 +182,83 @@ func (m *MainWindow) startRun() {
 	go m.runFieryAutomation(ctx, server, selectedFiles, workers)
 }
 
+func (m *MainWindow) serverConnection() (model.ServerConnection, bool) {
+	server := model.ServerConnection{
+		IPAddress: strings.TrimSpace(m.serverIP.Text()),
+		SecretKey: strings.TrimSpace(m.secretKey.Text()),
+		Password:  strings.TrimSpace(m.password.Text()),
+	}
+	if server.IPAddress == "" || server.SecretKey == "" || server.Password == "" {
+		m.setStatus("Server IP address, secret key, and admin password are required.")
+		m.appendLog("Validation failed: server IP address, secret key, and admin password are required")
+		return model.ServerConnection{}, false
+	}
+	return server, true
+}
+
 func (m *MainWindow) cancelRun() {
 	if m.cancel != nil {
 		m.cancel()
 		m.appendLog("Cancellation requested")
 	}
+}
+
+func (m *MainWindow) captureCapabilities() {
+	if m.running.Load() {
+		return
+	}
+	server, ok := m.serverConnection()
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	m.running.Store(true)
+	m.setStatus("Capturing Fiery API v5 capabilities...")
+	m.appendLog("Starting v5 capability capture for %s", server.IPAddress)
+	go m.runCapabilityCapture(ctx, server)
+}
+
+func (m *MainWindow) runCapabilityCapture(ctx context.Context, server model.ServerConnection) {
+	defer func() {
+		m.wnd.UiThread(func() { m.running.Store(false) })
+	}()
+	client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
+	if err != nil {
+		m.wnd.UiThread(func() {
+			m.setStatus("Server configuration is invalid.")
+			m.appendLog("Server configuration failed: %s", err)
+		})
+		return
+	}
+	session, err := client.Login(ctx)
+	if err != nil {
+		m.wnd.UiThread(func() {
+			m.setStatus("Unable to authenticate with the server.")
+			m.appendLog("Login failed: %s", err)
+		})
+		return
+	}
+	snapshot := client.DiscoverV5(ctx, session)
+	path, err := client.SaveCapabilitySnapshot(snapshot, captureDirectory())
+	m.wnd.UiThread(func() {
+		if err != nil {
+			m.setStatus("Capability capture failed.")
+			m.appendLog("Capture failed: %s", err)
+			return
+		}
+		m.setStatus("Capability capture saved.")
+		m.appendLog("Captured %d v5 endpoint response(s)", len(snapshot.Endpoints))
+		m.appendLog("Saved snapshot: %s", path)
+	})
+}
+
+func captureDirectory() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "captures"
+	}
+	return filepath.Join(filepath.Dir(exe), "captures")
 }
 
 func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int) {
