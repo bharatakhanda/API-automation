@@ -429,7 +429,10 @@ func (w *Window) startRun() {
 }
 
 func (w *Window) runAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, combos []combinations.Combination, mode runMode) {
-	defer w.running.Store(false)
+	defer func() {
+		w.running.Store(false)
+		w.window.Invalidate()
+	}()
 	client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
 	if err != nil {
 		w.setStatus("Server configuration invalid: " + err.Error())

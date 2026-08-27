@@ -363,25 +363,83 @@ func (c *Client) jobAction(ctx context.Context, session Session, apiPath, jobID,
 func extractJobAttributes(body []byte) map[string]string {
 	var payload struct {
 		Data struct {
-			Item map[string]any `json:"item"`
+			Item  map[string]any   `json:"item"`
+			Items []map[string]any `json:"items"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(body, &payload); err != nil || len(payload.Data.Item) == 0 {
-		var direct struct {
-			Data struct {
-				Items []map[string]any `json:"items"`
-			} `json:"data"`
-		}
-		if json.Unmarshal(body, &direct) != nil || len(direct.Data.Items) == 0 {
-			return nil
-		}
-		payload.Data.Item = direct.Data.Items[0]
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil
 	}
-	attrs := make(map[string]string, len(payload.Data.Item))
-	for key, value := range payload.Data.Item {
-		attrs[key] = strings.TrimSpace(fmt.Sprint(value))
+
+	item := payload.Data.Item
+	if len(item) == 0 && len(payload.Data.Items) > 0 {
+		item = payload.Data.Items[0]
+	}
+	if len(item) == 0 {
+		return nil
+	}
+
+	attrs := make(map[string]string, len(item))
+	collectJobAttributes(attrs, item)
+	if len(attrs) == 0 {
+		return nil
 	}
 	return attrs
+}
+
+func collectJobAttributes(out map[string]string, item map[string]any) {
+	for key, value := range item {
+		switch key {
+		case "attributes":
+			collectAnyMap(out, value)
+		case "job":
+			if nested, ok := asStringAnyMap(value); ok {
+				collectJobAttributes(out, nested)
+			}
+		default:
+			if _, isNested := value.(map[string]any); isNested {
+				continue
+			}
+			out[key] = normalizeAttributeValue(value)
+		}
+	}
+}
+
+func collectAnyMap(out map[string]string, value any) {
+	attrs, ok := asStringAnyMap(value)
+	if !ok {
+		return
+	}
+	for key, raw := range attrs {
+		out[key] = normalizeAttributeValue(raw)
+	}
+}
+
+func asStringAnyMap(value any) (map[string]any, bool) {
+	if typed, ok := value.(map[string]any); ok {
+		return typed, true
+	}
+	return nil, false
+}
+
+func normalizeAttributeValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	case map[string]any:
+		for _, key := range []string{"value", "name", "id", "status"} {
+			if nested, ok := typed[key]; ok {
+				return normalizeAttributeValue(nested)
+			}
+		}
+		return ""
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
 }
 
 func extractJobID(body []byte) string {
