@@ -44,6 +44,8 @@ type MainWindow struct {
 	mediaType     *ui.ComboBox
 	printSpeed    *ui.ComboBox
 	runMode       *ui.ComboBox
+	strategy      *ui.ComboBox
+	maxCases      *ui.Edit
 	concurrency   *ui.Edit
 	runButton     *ui.Button
 	captureButton *ui.Button
@@ -54,8 +56,9 @@ type MainWindow struct {
 	log           *ui.Edit
 	status        *ui.Static
 
-	cancel  context.CancelFunc
-	running atomic.Bool
+	capabilities capabilities.Model
+	cancel       context.CancelFunc
+	running      atomic.Bool
 }
 
 func Run() int {
@@ -107,6 +110,10 @@ func Run() int {
 	concurrency := ui.NewEdit(wnd, ui.OptsEdit().Text("1").Position(ui.Dpi(970, 432)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Run mode").Position(ui.Dpi(1064, 408)).Size(ui.Dpi(90, 20)))
 	runMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(1064, 432)).Width(ui.DpiX(132)).Texts("Hold", "Process and Hold", "RIP", "Press Print", "Ready to Print", "Print").Select(0))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Strategy").Position(ui.Dpi(970, 546)).Size(ui.Dpi(90, 20)))
+	strategy := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(970, 570)).Width(ui.DpiX(136)).Texts("Selected only", "All permutations", "Pairwise", "Random sample").Select(0))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Max cases").Position(ui.Dpi(1120, 546)).Size(ui.Dpi(90, 20)))
+	maxCases := ui.NewEdit(wnd, ui.OptsEdit().Text("100").Position(ui.Dpi(1120, 570)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
 
 	ui.NewStatic(wnd, ui.OptsStatic().Text("04  SERVER CAPABILITIES").Position(ui.Dpi(220, 476)).Size(ui.Dpi(220, 18)))
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Queue").Position(ui.Dpi(220, 478+0)).Size(ui.Dpi(90, 20)))
@@ -135,7 +142,7 @@ func Run() int {
 		CtrlStyle(co.ES_MULTILINE|co.ES_AUTOVSCROLL|co.ES_READONLY|co.ES_WANTRETURN).
 		WndStyle(co.WS_CHILD|co.WS_VISIBLE|co.WS_VSCROLL|co.WS_TABSTOP))
 
-	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, queue: queue, pageSize: pageSize, resolution: resolution, colorMode: colorMode, mediaType: mediaType, printSpeed: printSpeed, runMode: runMode, concurrency: concurrency, runButton: runButton, captureButton: captureButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status}
+	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, queue: queue, pageSize: pageSize, resolution: resolution, colorMode: colorMode, mediaType: mediaType, printSpeed: printSpeed, runMode: runMode, strategy: strategy, maxCases: maxCases, concurrency: concurrency, runButton: runButton, captureButton: captureButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status}
 	mw.events()
 	return wnd.RunAsMain()
 }
@@ -205,15 +212,16 @@ func (m *MainWindow) startRun() {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.running.Store(true)
-	attributes := m.selectedJobAttributes()
 	mode := m.selectedRunMode()
-	combos := combinations.Generate([]combinations.Axis{attributesToAxis(attributes), combinations.Axis{Name: "RunMode", Values: []string{mode.Label}}}, 1)
+	strategy := m.selectedStrategy()
+	maxCases := m.selectedMaxCases()
+	combos := m.selectedCombinations(strategy, maxCases)
 	m.results.DeleteAllItems()
 	m.setStatus("Connecting to Fiery server " + server.IPAddress + "...")
-	m.appendLog("Starting server automation with %d worker(s), %d selected test file(s), %d selected job attribute(s), mode=%s", workers, len(selectedFiles), len(attributes), mode.Label)
-	m.appendLog("Generated %d executable test combination(s) from current UI selections", len(combos))
+	m.appendLog("Starting server automation with %d worker(s), %d selected test file(s), mode=%s, strategy=%s", workers, len(selectedFiles), mode.Label, strategy)
+	m.appendLog("Generated %d executable test combination(s)", len(combos))
 
-	go m.runFieryAutomation(ctx, server, selectedFiles, workers, attributes, mode)
+	go m.runFieryAutomation(ctx, server, selectedFiles, workers, combos, mode)
 }
 
 func (m *MainWindow) serverConnection() (model.ServerConnection, bool) {
@@ -287,6 +295,7 @@ func (m *MainWindow) runCapabilityCapture(ctx context.Context, server model.Serv
 		if envErr != nil {
 			m.appendLog("Environment snapshot failed: %s", envErr)
 		}
+		m.capabilities = capabilityModel
 		m.populateCapabilities(capabilityModel)
 		m.setStatus("Capability capture saved and UI populated from server response. Preflight: " + environmentSnapshot.OverallStatus)
 		m.appendLog("Captured %d v4/v5 endpoint response(s)", len(snapshot.Endpoints))
@@ -337,6 +346,7 @@ func (m *MainWindow) expandComboDropDowns() {
 	m.setComboDropDownHeight(m.mediaType, 260)
 	m.setComboDropDownHeight(m.printSpeed, 150)
 	m.setComboDropDownHeight(m.runMode, 180)
+	m.setComboDropDownHeight(m.strategy, 150)
 }
 
 func (m *MainWindow) setComboDropDownHeight(combo *ui.ComboBox, width int) {
@@ -367,6 +377,56 @@ func (m *MainWindow) selectedJobAttributes() map[string]string {
 	addSelectedAttribute(attributes, "EFMediaType", m.mediaType)
 	addSelectedAttribute(attributes, "EFPrintSpeed", m.printSpeed)
 	return attributes
+}
+
+func (m *MainWindow) selectedCombinations(strategy combinations.Strategy, limit int) []combinations.Combination {
+	if strategy == combinations.StrategySelected {
+		combo := combinations.Combination{}
+		for key, value := range m.selectedJobAttributes() {
+			combo[key] = value
+		}
+		if len(combo) == 0 {
+			return nil
+		}
+		return []combinations.Combination{combo}
+	}
+	axes := []combinations.Axis{
+		m.optionAxis("PageSize"),
+		m.optionAxis("EFResolution"),
+		m.optionAxis("EFColorMode"),
+		m.optionAxis("EFMediaType"),
+		m.optionAxis("EFPrintSpeed"),
+	}
+	return combinations.GenerateWithStrategy(axes, strategy, limit)
+}
+
+func (m *MainWindow) optionAxis(optionID string) combinations.Axis {
+	option, ok := m.capabilities.OptionByID(optionID)
+	if !ok {
+		return combinations.Axis{}
+	}
+	return combinations.Axis{Name: optionID, Values: option.Values}
+}
+
+func (m *MainWindow) selectedStrategy() combinations.Strategy {
+	switch m.strategy.SelectedIndex() {
+	case 1:
+		return combinations.StrategyAll
+	case 2:
+		return combinations.StrategyPairwise
+	case 3:
+		return combinations.StrategyRandom
+	default:
+		return combinations.StrategySelected
+	}
+}
+
+func (m *MainWindow) selectedMaxCases() int {
+	limit, err := strconv.Atoi(strings.TrimSpace(m.maxCases.Text()))
+	if err != nil || limit < 1 {
+		return 100
+	}
+	return limit
 }
 
 func addSelectedAttribute(attributes map[string]string, name string, combo *ui.ComboBox) {
@@ -435,7 +495,12 @@ func runModeForIndex(index int) runMode {
 	}
 }
 
-func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, attributes map[string]string, mode runMode) {
+type testJob struct {
+	File       string
+	Attributes map[string]string
+}
+
+func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, combos []combinations.Combination, mode runMode) {
 	defer func() {
 		m.wnd.UiThread(func() { m.running.Store(false) })
 	}()
@@ -466,29 +531,29 @@ func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.Server
 		m.wnd.UiThread(func() { m.appendLog("Keep-alive check failed: %s", err) })
 	}
 
-	jobs := make(chan string)
+	jobs := make(chan testJob)
 	results := make(chan model.Result)
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for file := range jobs {
-				result, err := client.ImportJobToQueue(ctx, session, file, mode.ImportQueue)
-				verification := attributeVerification{Passed: len(attributes) == 0, Mode: mode.Label}
+			for job := range jobs {
+				result, err := client.ImportJobToQueue(ctx, session, job.File, mode.ImportQueue)
+				verification := attributeVerification{Passed: len(job.Attributes) == 0, Mode: mode.Label}
 				if err == nil && result.JobID != "" {
-					if len(attributes) > 0 {
-						err = client.UpdateJobAttributes(ctx, session, result.JobID, attributes)
+					if len(job.Attributes) > 0 {
+						err = client.UpdateJobAttributes(ctx, session, result.JobID, job.Attributes)
 					}
 					if err == nil {
 						err = runJobActions(ctx, client, session, result.JobID, mode)
 					}
-					if err == nil && len(attributes) > 0 {
+					if err == nil && len(job.Attributes) > 0 {
 						actual, getErr := client.GetJobAttributes(ctx, session, result.JobID)
 						if getErr != nil {
 							err = getErr
 						} else {
-							verification = verifyAttributes(attributes, actual)
+							verification = verifyAttributes(job.Attributes, actual)
 							verification.Mode = mode.Label
 						}
 					}
@@ -504,11 +569,16 @@ func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.Server
 	}
 	go func() {
 		defer close(jobs)
+		if len(combos) == 0 {
+			combos = []combinations.Combination{{}}
+		}
 		for _, file := range selectedFiles {
-			select {
-			case jobs <- file:
-			case <-ctx.Done():
-				return
+			for _, combo := range combos {
+				select {
+				case jobs <- testJob{File: file, Attributes: combinationToAttributes(combo)}:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}()
@@ -540,6 +610,14 @@ func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.Server
 		m.setStatus(fmt.Sprintf("Completed. total=%d pass=%d fail=%d error=%d", count, passed, failed, errored))
 		m.appendLog("Server automation finished: total=%d pass=%d fail=%d error=%d", count, passed, failed, errored)
 	})
+}
+
+func combinationToAttributes(combo combinations.Combination) map[string]string {
+	attrs := make(map[string]string, len(combo))
+	for key, value := range combo {
+		attrs[key] = value
+	}
+	return attrs
 }
 
 func runJobActions(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, mode runMode) error {
