@@ -134,9 +134,9 @@ func Run() int {
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Run mode").Position(ui.Dpi(952, 254)).Size(ui.Dpi(90, 20)))
 	runMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(952, 278)).Width(ui.DpiX(170)).Texts("Hold", "Process and Hold", "RIP", "Press Print", "Ready to Print", "Print").Select(0))
 	strategyLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Strategy").Position(ui.Dpi(660, 398)).Size(ui.Dpi(90, 20)))
-	strategy := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(660, 420)).Width(ui.DpiX(136)).Texts("Selected only", "All permutations", "Pairwise", "Random sample").Select(0))
-	maxCasesLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Max cases").Position(ui.Dpi(812, 398)).Size(ui.Dpi(90, 20)))
-	maxCases := ui.NewEdit(wnd, ui.OptsEdit().Text("100").Position(ui.Dpi(812, 420)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
+	strategy := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(660, 420)).Width(ui.DpiX(160)).Texts("Selected only", "All permutations", "Pairwise", "Random sample").Select(0))
+	maxCasesLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Max cases").Position(ui.Dpi(840, 398)).Size(ui.Dpi(90, 20)))
+	maxCases := ui.NewEdit(wnd, ui.OptsEdit().Text("100").Position(ui.Dpi(840, 420)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
 
 	var capabilityCtrls []hwndControl
 	capTitle := ui.NewStatic(wnd, ui.OptsStatic().Text("03  SERVER CAPABILITIES").Position(ui.Dpi(220, 326)).Size(ui.Dpi(220, 18)))

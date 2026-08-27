@@ -32,6 +32,8 @@ func enterpriseLayoutRects() []uiRect {
 		{Name: "colorMode", X: 760, Y: 354, W: 140, H: 26, Layer: "input"},
 		{Name: "mediaType", X: 220, Y: 420, W: 240, H: 26, Layer: "input"},
 		{Name: "printSpeed", X: 480, Y: 420, W: 150, H: 26, Layer: "input"},
+		{Name: "strategy", X: 660, Y: 420, W: 160, H: 26, Layer: "input"},
+		{Name: "maxCases", X: 840, Y: 420, W: 76, H: 26, Layer: "input"},
 		{Name: "status", X: 220, Y: 560, W: 940, H: 22, Layer: "status"},
 		{Name: "results", X: 220, Y: 612, W: 940, H: 86, Layer: "surface"},
 		{Name: "log", X: 220, Y: 730, W: 940, H: 24, Layer: "surface"},
