@@ -13,9 +13,10 @@ type uiRect struct {
 
 func enterpriseLayoutRects() []uiRect {
 	return []uiRect{
-		{Name: "captureButton", X: 822, Y: 24, W: 170, H: 28, Layer: "action"},
-		{Name: "runButton", X: 1004, Y: 24, W: 132, H: 28, Layer: "action"},
-		{Name: "cancelButton", X: 1004, Y: 58, W: 132, H: 28, Layer: "action"},
+		{Name: "settingsButton", X: 620, Y: 24, W: 110, H: 30, Layer: "action"},
+		{Name: "captureButton", X: 742, Y: 24, W: 240, H: 30, Layer: "action"},
+		{Name: "runButton", X: 994, Y: 24, W: 142, H: 30, Layer: "action"},
+		{Name: "cancelButton", X: 994, Y: 60, W: 142, H: 28, Layer: "action"},
 		{Name: "folderPath", X: 220, Y: 126, W: 650, H: 26, Layer: "input"},
 		{Name: "browseFolder", X: 884, Y: 125, W: 96, H: 28, Layer: "action"},
 		{Name: "selectionMode", X: 220, Y: 184, W: 150, H: 26, Layer: "input"},

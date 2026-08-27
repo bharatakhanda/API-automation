@@ -87,16 +87,16 @@ func Run() int {
 	ui.NewStatic(wnd, ui.OptsStatic().Text("› Run History").Position(ui.Dpi(30, 172)).Size(ui.Dpi(130, 20)))
 
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Server Execution Workspace").Position(ui.Dpi(220, 18)).Size(ui.Dpi(300, 24)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Connect securely, choose test assets, and execute API automation against the server.").Position(ui.Dpi(220, 48)).Size(ui.Dpi(720, 22)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Discover Fiery capabilities, select job options, and run API automation.").Position(ui.Dpi(220, 48)).Size(ui.Dpi(500, 22)))
 
-	settingsButton := ui.NewButton(wnd, ui.OptsButton().Text("&Settings").Position(ui.Dpi(700, 24)).Width(ui.DpiX(110)).Height(ui.DpiY(28)))
-	captureButton := ui.NewButton(wnd, ui.OptsButton().Text("Get &capabilities of the server").Position(ui.Dpi(822, 24)).Width(ui.DpiX(170)).Height(ui.DpiY(28)))
-	runButton := ui.NewButton(wnd, ui.OptsButton().Text("&Run automation").Position(ui.Dpi(1004, 24)).Width(ui.DpiX(132)).Height(ui.DpiY(28)))
-	cancelButton := ui.NewButton(wnd, ui.OptsButton().Text("&Cancel").Position(ui.Dpi(1004, 58)).Width(ui.DpiX(132)).Height(ui.DpiY(28)))
-	progress := ui.NewProgressBar(wnd, ui.OptsProgressBar().Position(ui.Dpi(822, 58)).Size(ui.Dpi(170, 18)))
+	settingsButton := ui.NewButton(wnd, ui.OptsButton().Text("&Settings").Position(ui.Dpi(620, 24)).Width(ui.DpiX(110)).Height(ui.DpiY(30)))
+	captureButton := ui.NewButton(wnd, ui.OptsButton().Text("Get server &capabilities").Position(ui.Dpi(742, 24)).Width(ui.DpiX(240)).Height(ui.DpiY(30)))
+	runButton := ui.NewButton(wnd, ui.OptsButton().Text("&Run automation").Position(ui.Dpi(994, 24)).Width(ui.DpiX(142)).Height(ui.DpiY(30)))
+	cancelButton := ui.NewButton(wnd, ui.OptsButton().Text("&Cancel run").Position(ui.Dpi(994, 60)).Width(ui.DpiX(142)).Height(ui.DpiY(28)))
+	progress := ui.NewProgressBar(wnd, ui.OptsProgressBar().Position(ui.Dpi(742, 62)).Size(ui.Dpi(240, 18)))
 
 	var settingsCtrls []hwndControl
-	settingsTitle := ui.NewStatic(wnd, ui.OptsStatic().Text("SETTINGS  SERVER CONNECTION").Position(ui.Dpi(220, 80)).Size(ui.Dpi(240, 18)))
+	settingsTitle := ui.NewStatic(wnd, ui.OptsStatic().Text("SETTINGS  SERVER CONNECTION").Position(ui.Dpi(220, 80)).Size(ui.Dpi(320, 18)))
 	settingsCtrls = append(settingsCtrls, settingsTitle)
 	serverIPLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Server IP address").Position(ui.Dpi(220, 100)).Size(ui.Dpi(140, 20)))
 	settingsCtrls = append(settingsCtrls, serverIPLabel)
@@ -215,7 +215,11 @@ func buildMultiSelectControls(wnd *ui.Main) (map[string][]*ui.CheckBox, []hwndCo
 }
 
 func (m *MainWindow) events() {
+	newAppTheme().apply(m)
 	m.wnd.On().WmCreate(func(_ ui.WmCreate) int {
+		_ = m.wnd.Hwnd().DwmSetWindowAttribute(win.DwmAttrCaptionColor(win.RGB(9, 30, 66)))
+		_ = m.wnd.Hwnd().DwmSetWindowAttribute(win.DwmAttrTextColor(win.RGB(255, 255, 255)))
+		_ = m.wnd.Hwnd().DwmSetWindowAttribute(win.DwmAttrBorderColor(win.RGB(0, 82, 204)))
 		m.expandComboDropDowns()
 		m.showControls(m.settingsCtrls, false)
 		m.showControls(m.capabilityCtrls, false)
