@@ -37,26 +37,42 @@ type MainWindow struct {
 
 func Run() int {
 	exec := engine.NewExecutor()
-	wnd := ui.NewMain(ui.OptsMain().Title("API Automation").Size(ui.Dpi(920, 640)))
+	wnd := ui.NewMain(ui.OptsMain().Title("API Automation").Size(ui.Dpi(1180, 760)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("URL").Position(ui.Dpi(12, 16)))
-	url := ui.NewEdit(wnd, ui.OptsEdit().Text("https://httpbin.org/get").Position(ui.Dpi(52, 12)).Width(ui.DpiX(520)).Height(ui.DpiY(24)))
+	// Enterprise shell: persistent navigation on the left, work area on the right.
+	ui.NewStatic(wnd, ui.OptsStatic().Text("API Automation").Position(ui.Dpi(18, 18)).Size(ui.Dpi(150, 22)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Workspace").Position(ui.Dpi(18, 58)).Size(ui.Dpi(150, 20)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("› Requests").Position(ui.Dpi(30, 88)).Size(ui.Dpi(130, 20)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("› Collections").Position(ui.Dpi(30, 116)).Size(ui.Dpi(130, 20)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("› Environments").Position(ui.Dpi(30, 144)).Size(ui.Dpi(130, 20)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("› Run History").Position(ui.Dpi(30, 172)).Size(ui.Dpi(130, 20)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Method").Position(ui.Dpi(590, 16)))
-	method := ui.NewEdit(wnd, ui.OptsEdit().Text(http.MethodGet).Position(ui.Dpi(645, 12)).Width(ui.DpiX(70)).Height(ui.DpiY(24)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Request Builder").Position(ui.Dpi(200, 18)).Size(ui.Dpi(180, 24)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Create, execute, and inspect API requests from a single controlled workspace.").Position(ui.Dpi(200, 44)).Size(ui.Dpi(620, 22)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Workers").Position(ui.Dpi(730, 16)))
-	concurrency := ui.NewEdit(wnd, ui.OptsEdit().Text("1").Position(ui.Dpi(790, 12)).Width(ui.DpiX(40)).Height(ui.DpiY(24)))
+	runButton := ui.NewButton(wnd, ui.OptsButton().Text("&Run request").Position(ui.Dpi(910, 24)).Width(ui.DpiX(110)))
+	cancelButton := ui.NewButton(wnd, ui.OptsButton().Text("&Cancel").Position(ui.Dpi(1030, 24)).Width(ui.DpiX(90)))
 
-	runButton := ui.NewButton(wnd, ui.OptsButton().Text("&Run").Position(ui.Dpi(12, 48)).Width(ui.DpiX(90)))
-	cancelButton := ui.NewButton(wnd, ui.OptsButton().Text("&Cancel").Position(ui.Dpi(112, 48)).Width(ui.DpiX(90)))
-	status := ui.NewStatic(wnd, ui.OptsStatic().Text("Ready").Position(ui.Dpi(220, 54)).Size(ui.Dpi(640, 22)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("REQUEST").Position(ui.Dpi(200, 88)).Size(ui.Dpi(120, 18)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Method").Position(ui.Dpi(200, 118)).Size(ui.Dpi(70, 20)))
+	method := ui.NewEdit(wnd, ui.OptsEdit().Text(http.MethodGet).Position(ui.Dpi(200, 142)).Width(ui.DpiX(92)).Height(ui.DpiY(26)))
 
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Endpoint URL").Position(ui.Dpi(312, 118)).Size(ui.Dpi(120, 20)))
+	url := ui.NewEdit(wnd, ui.OptsEdit().Text("https://httpbin.org/get").Position(ui.Dpi(312, 142)).Width(ui.DpiX(610)).Height(ui.DpiY(26)))
+
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Workers").Position(ui.Dpi(944, 118)).Size(ui.Dpi(90, 20)))
+	concurrency := ui.NewEdit(wnd, ui.OptsEdit().Text("1").Position(ui.Dpi(944, 142)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
+
+	status := ui.NewStatic(wnd, ui.OptsStatic().Text("Ready").Position(ui.Dpi(200, 184)).Size(ui.Dpi(920, 22)))
+
+	ui.NewStatic(wnd, ui.OptsStatic().Text("EXECUTION RESULTS").Position(ui.Dpi(200, 222)).Size(ui.Dpi(160, 18)))
 	results := ui.NewListView(wnd, ui.OptsListView().
-		Position(ui.Dpi(12, 88)).Size(ui.Dpi(880, 300)).
-		Column("Name", ui.DpiX(160)).Column("Method", ui.DpiX(80)).Column("Status", ui.DpiX(80)).Column("Duration", ui.DpiX(100)).Column("URL", ui.DpiX(420)))
+		Position(ui.Dpi(200, 248)).Size(ui.Dpi(920, 300)).
+		CtrlExStyle(co.LVS_EX_FULLROWSELECT|co.LVS_EX_GRIDLINES).
+		Column("Request", ui.DpiX(190)).Column("Method", ui.DpiX(90)).Column("Status", ui.DpiX(90)).Column("Duration", ui.DpiX(120)).Column("URL", ui.DpiX(420)))
 
-	log := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(12, 404)).Width(ui.DpiX(880)).Height(ui.DpiY(180)).
+	ui.NewStatic(wnd, ui.OptsStatic().Text("ACTIVITY LOG").Position(ui.Dpi(200, 572)).Size(ui.Dpi(160, 18)))
+	log := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(200, 598)).Width(ui.DpiX(920)).Height(ui.DpiY(100)).
 		CtrlStyle(co.ES_MULTILINE|co.ES_AUTOVSCROLL|co.ES_READONLY|co.ES_WANTRETURN).
 		WndStyle(co.WS_CHILD|co.WS_VISIBLE|co.WS_VSCROLL|co.WS_TABSTOP))
 
