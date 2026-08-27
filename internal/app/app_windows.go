@@ -66,6 +66,12 @@ func Run() int {
 	runButton := ui.NewButton(wnd, ui.OptsButton().Text("&Run automation").Position(ui.Dpi(930, 24)).Width(ui.DpiX(130)))
 	cancelButton := ui.NewButton(wnd, ui.OptsButton().Text("&Cancel").Position(ui.Dpi(1070, 24)).Width(ui.DpiX(90)))
 
+	ui.NewButton(wnd, ui.OptsButton().Text("  Server connection  ").Position(ui.Dpi(190, 80)).Width(ui.DpiX(780)).Height(ui.DpiY(104)).CtrlStyle(co.BS_GROUPBOX))
+	ui.NewButton(wnd, ui.OptsButton().Text("  Test assets  ").Position(ui.Dpi(190, 186)).Width(ui.DpiX(780)).Height(ui.DpiY(166)).CtrlStyle(co.BS_GROUPBOX))
+	ui.NewButton(wnd, ui.OptsButton().Text("  Fiery import  ").Position(ui.Dpi(190, 356)).Width(ui.DpiX(960)).Height(ui.DpiY(104)).CtrlStyle(co.BS_GROUPBOX))
+	ui.NewButton(wnd, ui.OptsButton().Text("  Execution results  ").Position(ui.Dpi(190, 492)).Width(ui.DpiX(960)).Height(ui.DpiY(212)).CtrlStyle(co.BS_GROUPBOX))
+	ui.NewButton(wnd, ui.OptsButton().Text("  Activity log  ").Position(ui.Dpi(190, 708)).Width(ui.DpiX(960)).Height(ui.DpiY(84)).CtrlStyle(co.BS_GROUPBOX))
+
 	ui.NewStatic(wnd, ui.OptsStatic().Text("SERVER CONNECTION").Position(ui.Dpi(200, 88)).Size(ui.Dpi(180, 18)))
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Server IP address").Position(ui.Dpi(200, 118)).Size(ui.Dpi(140, 20)))
 	serverIP := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(200, 142)).Width(ui.DpiX(250)).Height(ui.DpiY(26)))
@@ -134,7 +140,10 @@ func (m *MainWindow) events() {
 			m.filePath.SetText(path)
 		}
 	})
-	m.wnd.On().WmClose(func() { m.cancelRun() })
+	m.wnd.On().WmClose(func() {
+		m.cancelRun()
+		_ = m.wnd.Hwnd().DestroyWindow()
+	})
 }
 
 func (m *MainWindow) startRun() {
