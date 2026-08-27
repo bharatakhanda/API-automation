@@ -1,5 +1,6 @@
 bin/
 dist/
+DATA/
 *.exe
 *.test
 *.out
