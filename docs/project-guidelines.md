@@ -82,7 +82,8 @@ The application connects to a server before automation can run.
 Required user-provided connection inputs:
 
 - server IP address,
-- secret key.
+- secret key,
+- server/admin password required by the Fiery login API.
 
 Required test asset inputs:
 
@@ -97,7 +98,31 @@ Supported file selection strategies:
 
 Rules:
 
-- Automation must not start without a server IP address and secret key.
+- Automation must not start without a server IP address, secret key, and admin password.
 - Automation must not start without a valid test folder.
 - Random selection is owned by the application, not the user.
 - File selection logic must remain testable outside the UI.
+
+## Fiery API reference behavior
+
+The temporary `DATA/` folder is reference-only and must never be committed. It contains old JavaScript/Python automation that informed the Go implementation.
+
+Useful behavior incorporated into the Go application:
+
+- Fiery server base URL: `https://{server}`.
+- Login endpoint: `POST /live/api/v5/login`.
+- Login payload uses `username`, `password`, and `accessrights` where `accessrights` maps to the user-provided secret key.
+- Do not hardcode credentials from the temporary `DATA/` folder into source code.
+- The server returns an authenticated session cookie via `Set-Cookie`.
+- Test files are imported as jobs with multipart upload to `POST /live/api/v5/jobs`.
+- Import form fields:
+  - `file`: selected test file.
+  - `queue`: `hold`.
+- Keep-alive/status check uses `GET /live/api/v4/info`.
+- Fiery installations may use self-signed certificates, so the server client supports controlled insecure TLS for this environment.
+- Job operation endpoints available for future workflow steps:
+  - `PUT /live/api/v4/jobs/{jobId}/rip`
+  - `PUT /live/api/v4/jobs/{jobId}/press_print`
+  - `PUT /live/api/v4/jobs/{jobId}/print`
+  - `DELETE /live/api/v4/jobs/{jobId}`
+  - `POST /live/api/v4/jobs/{jobId}` for attribute updates.
