@@ -30,11 +30,10 @@ func TestEnterpriseLayoutHasReadableSpacing(t *testing.T) {
 			t.Fatalf("%s has invalid size: %#v", r.Name, r)
 		}
 	}
-	assertVerticalGap(t, "serverIP", "folderPath", 70)
-	assertVerticalGap(t, "folderPath", "selectionMode", 36)
-	assertVerticalGap(t, "selectionMode", "method", 80)
+	assertVerticalGap(t, "folderPath", "selectionMode", 30)
+	assertVerticalGap(t, "selectionMode", "method", 60)
 	assertVerticalGap(t, "method", "results", 80)
-	assertVerticalGap(t, "results", "log", 36)
+	assertVerticalGap(t, "results", "log", 30)
 }
 
 func assertVerticalGap(t *testing.T, upper, lower string, minGap int) {

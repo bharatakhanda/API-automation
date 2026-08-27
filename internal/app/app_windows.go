@@ -27,6 +27,10 @@ import (
 	"github.com/rodrigocfd/windigo/win"
 )
 
+type hwndControl interface {
+	Hwnd() win.HWND
+}
+
 type MainWindow struct {
 	wnd               *ui.Main
 	serverIP          *ui.Edit
@@ -51,12 +55,17 @@ type MainWindow struct {
 	concurrency       *ui.Edit
 	runButton         *ui.Button
 	captureButton     *ui.Button
+	settingsButton    *ui.Button
 	cancelButton      *ui.Button
 	browseFolder      *ui.Button
 	browseFile        *ui.Button
 	results           *ui.ListView
 	log               *ui.Edit
 	status            *ui.Static
+	progress          *ui.ProgressBar
+	settingsCtrls     []hwndControl
+	capabilityCtrls   []hwndControl
+	settingsVisible   bool
 
 	capabilities capabilities.Model
 	cancel       context.CancelFunc
@@ -80,108 +89,142 @@ func Run() int {
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Server Execution Workspace").Position(ui.Dpi(220, 18)).Size(ui.Dpi(300, 24)))
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Connect securely, choose test assets, and execute API automation against the server.").Position(ui.Dpi(220, 48)).Size(ui.Dpi(720, 22)))
 
-	captureButton := ui.NewButton(wnd, ui.OptsButton().Text("Capture &capabilities").Position(ui.Dpi(778, 24)).Width(ui.DpiX(170)).Height(ui.DpiY(28)))
-	runButton := ui.NewButton(wnd, ui.OptsButton().Text("&Run automation").Position(ui.Dpi(960, 24)).Width(ui.DpiX(132)).Height(ui.DpiY(28)))
-	cancelButton := ui.NewButton(wnd, ui.OptsButton().Text("&Cancel").Position(ui.Dpi(1104, 24)).Width(ui.DpiX(92)).Height(ui.DpiY(28)))
+	settingsButton := ui.NewButton(wnd, ui.OptsButton().Text("&Settings").Position(ui.Dpi(700, 24)).Width(ui.DpiX(110)).Height(ui.DpiY(28)))
+	captureButton := ui.NewButton(wnd, ui.OptsButton().Text("Get &capabilities of the server").Position(ui.Dpi(822, 24)).Width(ui.DpiX(170)).Height(ui.DpiY(28)))
+	runButton := ui.NewButton(wnd, ui.OptsButton().Text("&Run automation").Position(ui.Dpi(1004, 24)).Width(ui.DpiX(132)).Height(ui.DpiY(28)))
+	cancelButton := ui.NewButton(wnd, ui.OptsButton().Text("&Cancel").Position(ui.Dpi(1004, 58)).Width(ui.DpiX(132)).Height(ui.DpiY(28)))
+	progress := ui.NewProgressBar(wnd, ui.OptsProgressBar().Position(ui.Dpi(822, 58)).Size(ui.Dpi(170, 18)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("01  SERVER CONNECTION").Position(ui.Dpi(220, 96)).Size(ui.Dpi(220, 18)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Server IP address").Position(ui.Dpi(220, 118)).Size(ui.Dpi(140, 20)))
-	serverIP := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 142)).Width(ui.DpiX(250)).Height(ui.DpiY(26)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Secret key").Position(ui.Dpi(492, 118)).Size(ui.Dpi(120, 20)))
-	secretKey := ui.NewEdit(wnd, ui.OptsEdit().Text(fiery.DefaultSecretKey).Position(ui.Dpi(492, 142)).Width(ui.DpiX(300)).Height(ui.DpiY(26)).CtrlStyle(co.ES_PASSWORD|co.ES_AUTOHSCROLL|co.ES_NOHIDESEL))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Admin password").Position(ui.Dpi(814, 118)).Size(ui.Dpi(130, 20)))
-	password := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(814, 142)).Width(ui.DpiX(170)).Height(ui.DpiY(26)).CtrlStyle(co.ES_PASSWORD|co.ES_AUTOHSCROLL|co.ES_NOHIDESEL))
+	var settingsCtrls []hwndControl
+	settingsTitle := ui.NewStatic(wnd, ui.OptsStatic().Text("SETTINGS  SERVER CONNECTION").Position(ui.Dpi(220, 80)).Size(ui.Dpi(240, 18)))
+	settingsCtrls = append(settingsCtrls, settingsTitle)
+	serverIPLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Server IP address").Position(ui.Dpi(220, 100)).Size(ui.Dpi(140, 20)))
+	settingsCtrls = append(settingsCtrls, serverIPLabel)
+	serverIP := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 124)).Width(ui.DpiX(220)).Height(ui.DpiY(26)))
+	settingsCtrls = append(settingsCtrls, serverIP)
+	secretLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Secret key").Position(ui.Dpi(456, 100)).Size(ui.Dpi(120, 20)))
+	settingsCtrls = append(settingsCtrls, secretLabel)
+	secretKey := ui.NewEdit(wnd, ui.OptsEdit().Text(fiery.DefaultSecretKey).Position(ui.Dpi(456, 124)).Width(ui.DpiX(310)).Height(ui.DpiY(26)).CtrlStyle(co.ES_PASSWORD|co.ES_AUTOHSCROLL|co.ES_NOHIDESEL))
+	settingsCtrls = append(settingsCtrls, secretKey)
+	passwordLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Admin password").Position(ui.Dpi(782, 100)).Size(ui.Dpi(130, 20)))
+	settingsCtrls = append(settingsCtrls, passwordLabel)
+	password := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(782, 124)).Width(ui.DpiX(160)).Height(ui.DpiY(26)).CtrlStyle(co.ES_PASSWORD|co.ES_AUTOHSCROLL|co.ES_NOHIDESEL))
+	settingsCtrls = append(settingsCtrls, password)
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("02  TEST ASSETS").Position(ui.Dpi(220, 204)).Size(ui.Dpi(180, 18)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Folder").Position(ui.Dpi(220, 224)).Size(ui.Dpi(90, 20)))
-	folderPath := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 248)).Width(ui.DpiX(650)).Height(ui.DpiY(26)))
-	browseFolder := ui.NewButton(wnd, ui.OptsButton().Text("Browse...").Position(ui.Dpi(884, 247)).Width(ui.DpiX(96)).Height(ui.DpiY(28)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("01  TEST ASSETS").Position(ui.Dpi(220, 82)).Size(ui.Dpi(180, 18)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Folder").Position(ui.Dpi(220, 102)).Size(ui.Dpi(90, 20)))
+	folderPath := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 126)).Width(ui.DpiX(650)).Height(ui.DpiY(26)))
+	browseFolder := ui.NewButton(wnd, ui.OptsButton().Text("Browse...").Position(ui.Dpi(884, 125)).Width(ui.DpiX(96)).Height(ui.DpiY(28)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Selection").Position(ui.Dpi(220, 292)).Size(ui.Dpi(90, 20)))
-	selectionMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 316)).Width(ui.DpiX(150)).Texts("All files", "Single file", "Random file").Select(0))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Specific file (used only for Single file)").Position(ui.Dpi(396, 292)).Size(ui.Dpi(260, 20)))
-	filePath := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(396, 316)).Width(ui.DpiX(474)).Height(ui.DpiY(26)))
-	browseFile := ui.NewButton(wnd, ui.OptsButton().Text("Browse...").Position(ui.Dpi(884, 315)).Width(ui.DpiX(96)).Height(ui.DpiY(28)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Selection").Position(ui.Dpi(220, 160)).Size(ui.Dpi(90, 20)))
+	selectionMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 184)).Width(ui.DpiX(150)).Texts("All files", "Single file", "Random file").Select(0))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Specific file (used only for Single file)").Position(ui.Dpi(396, 160)).Size(ui.Dpi(260, 20)))
+	filePath := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(396, 184)).Width(ui.DpiX(474)).Height(ui.DpiY(26)))
+	browseFile := ui.NewButton(wnd, ui.OptsButton().Text("Browse...").Position(ui.Dpi(884, 183)).Width(ui.DpiX(96)).Height(ui.DpiY(28)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("03  FIERY IMPORT").Position(ui.Dpi(220, 388)).Size(ui.Dpi(180, 18)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Method").Position(ui.Dpi(220, 408)).Size(ui.Dpi(70, 20)))
-	method := ui.NewEdit(wnd, ui.OptsEdit().Text(http.MethodPost).Position(ui.Dpi(220, 432)).Width(ui.DpiX(92)).Height(ui.DpiY(26)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Import endpoint").Position(ui.Dpi(336, 408)).Size(ui.Dpi(120, 20)))
-	url := ui.NewEdit(wnd, ui.OptsEdit().Text("/live/api/v5/jobs").Position(ui.Dpi(336, 432)).Width(ui.DpiX(610)).Height(ui.DpiY(26)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Workers").Position(ui.Dpi(970, 408)).Size(ui.Dpi(90, 20)))
-	concurrency := ui.NewEdit(wnd, ui.OptsEdit().Text("1").Position(ui.Dpi(970, 432)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Run mode").Position(ui.Dpi(1064, 408)).Size(ui.Dpi(90, 20)))
-	runMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(1064, 432)).Width(ui.DpiX(132)).Texts("Hold", "Process and Hold", "RIP", "Press Print", "Ready to Print", "Print").Select(0))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Strategy").Position(ui.Dpi(970, 546)).Size(ui.Dpi(90, 20)))
-	strategy := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(970, 570)).Width(ui.DpiX(136)).Texts("Selected only", "All permutations", "Pairwise", "Random sample").Select(0))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Max cases").Position(ui.Dpi(1120, 546)).Size(ui.Dpi(90, 20)))
-	maxCases := ui.NewEdit(wnd, ui.OptsEdit().Text("100").Position(ui.Dpi(1120, 570)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("02  FIERY IMPORT").Position(ui.Dpi(220, 234)).Size(ui.Dpi(180, 18)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Method").Position(ui.Dpi(220, 254)).Size(ui.Dpi(70, 20)))
+	method := ui.NewEdit(wnd, ui.OptsEdit().Text(http.MethodPost).Position(ui.Dpi(220, 278)).Width(ui.DpiX(92)).Height(ui.DpiY(26)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Import endpoint").Position(ui.Dpi(336, 254)).Size(ui.Dpi(120, 20)))
+	url := ui.NewEdit(wnd, ui.OptsEdit().Text("/live/api/v5/jobs").Position(ui.Dpi(336, 278)).Width(ui.DpiX(510)).Height(ui.DpiY(26)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Workers").Position(ui.Dpi(860, 254)).Size(ui.Dpi(90, 20)))
+	concurrency := ui.NewEdit(wnd, ui.OptsEdit().Text("1").Position(ui.Dpi(860, 278)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Run mode").Position(ui.Dpi(952, 254)).Size(ui.Dpi(90, 20)))
+	runMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(952, 278)).Width(ui.DpiX(170)).Texts("Hold", "Process and Hold", "RIP", "Press Print", "Ready to Print", "Print").Select(0))
+	strategyLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Strategy").Position(ui.Dpi(660, 398)).Size(ui.Dpi(90, 20)))
+	strategy := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(660, 420)).Width(ui.DpiX(136)).Texts("Selected only", "All permutations", "Pairwise", "Random sample").Select(0))
+	maxCasesLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Max cases").Position(ui.Dpi(812, 398)).Size(ui.Dpi(90, 20)))
+	maxCases := ui.NewEdit(wnd, ui.OptsEdit().Text("100").Position(ui.Dpi(812, 420)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("04  SERVER CAPABILITIES").Position(ui.Dpi(220, 476)).Size(ui.Dpi(220, 18)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Queue").Position(ui.Dpi(220, 478+0)).Size(ui.Dpi(90, 20)))
-	queue := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 502)).Width(ui.DpiX(190)).Texts("Capture capabilities first").Select(0))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Page size").Position(ui.Dpi(432, 478)).Size(ui.Dpi(90, 20)))
-	pageSize := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(432, 502)).Width(ui.DpiX(190)).Texts("Capture capabilities first").Select(0))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Resolution").Position(ui.Dpi(644, 478)).Size(ui.Dpi(90, 20)))
-	resolution := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(644, 502)).Width(ui.DpiX(150)).Texts("Capture first").Select(0))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Color mode").Position(ui.Dpi(816, 478)).Size(ui.Dpi(90, 20)))
-	colorMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(816, 502)).Width(ui.DpiX(150)).Texts("Capture first").Select(0))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Media type").Position(ui.Dpi(220, 546)).Size(ui.Dpi(90, 20)))
-	mediaType := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 570)).Width(ui.DpiX(260)).Texts("Capture capabilities first").Select(0))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Print speed").Position(ui.Dpi(502, 546)).Size(ui.Dpi(90, 20)))
-	printSpeed := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(502, 570)).Width(ui.DpiX(150)).Texts("Capture first").Select(0))
+	var capabilityCtrls []hwndControl
+	capTitle := ui.NewStatic(wnd, ui.OptsStatic().Text("03  SERVER CAPABILITIES").Position(ui.Dpi(220, 326)).Size(ui.Dpi(220, 18)))
+	capabilityCtrls = append(capabilityCtrls, capTitle)
+	queueLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Queue").Position(ui.Dpi(220, 330)).Size(ui.Dpi(90, 20)))
+	capabilityCtrls = append(capabilityCtrls, queueLabel)
+	queue := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 354)).Width(ui.DpiX(170)).Texts("Capture capabilities first").Select(0))
+	capabilityCtrls = append(capabilityCtrls, queue)
+	pageSizeLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Page size").Position(ui.Dpi(410, 330)).Size(ui.Dpi(90, 20)))
+	capabilityCtrls = append(capabilityCtrls, pageSizeLabel)
+	pageSize := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(410, 354)).Width(ui.DpiX(170)).Texts("Capture capabilities first").Select(0))
+	capabilityCtrls = append(capabilityCtrls, pageSize)
+	resolutionLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Resolution").Position(ui.Dpi(600, 330)).Size(ui.Dpi(90, 20)))
+	capabilityCtrls = append(capabilityCtrls, resolutionLabel)
+	resolution := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(600, 354)).Width(ui.DpiX(140)).Texts("Capture first").Select(0))
+	capabilityCtrls = append(capabilityCtrls, resolution)
+	colorModeLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Color mode").Position(ui.Dpi(760, 330)).Size(ui.Dpi(90, 20)))
+	capabilityCtrls = append(capabilityCtrls, colorModeLabel)
+	colorMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(760, 354)).Width(ui.DpiX(140)).Texts("Capture first").Select(0))
+	capabilityCtrls = append(capabilityCtrls, colorMode)
+	mediaLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Media type").Position(ui.Dpi(220, 396)).Size(ui.Dpi(90, 20)))
+	capabilityCtrls = append(capabilityCtrls, mediaLabel)
+	mediaType := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 420)).Width(ui.DpiX(240)).Texts("Capture capabilities first").Select(0))
+	capabilityCtrls = append(capabilityCtrls, mediaType)
+	printSpeedLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Print speed").Position(ui.Dpi(480, 396)).Size(ui.Dpi(90, 20)))
+	capabilityCtrls = append(capabilityCtrls, printSpeedLabel)
+	printSpeed := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(480, 420)).Width(ui.DpiX(150)).Texts("Capture first").Select(0))
+	capabilityCtrls = append(capabilityCtrls, printSpeed)
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Multi-select values for permutation strategies").Position(ui.Dpi(220, 620)).Size(ui.Dpi(320, 18)))
-	multiSelects := buildMultiSelectControls(wnd)
+	multiTitle := ui.NewStatic(wnd, ui.OptsStatic().Text("Multi-select values for permutation strategies").Position(ui.Dpi(220, 462)).Size(ui.Dpi(320, 18)))
+	capabilityCtrls = append(capabilityCtrls, multiTitle)
+	multiSelects, multiHandles := buildMultiSelectControls(wnd)
+	capabilityCtrls = append(capabilityCtrls, multiHandles...)
+	capabilityCtrls = append(capabilityCtrls, strategyLabel, strategy, maxCasesLabel, maxCases)
 
-	status := ui.NewStatic(wnd, ui.OptsStatic().Text("Ready. Provide server IP, secret key, admin password, and a test file folder.").Position(ui.Dpi(220, 768)).Size(ui.Dpi(940, 22)))
+	status := ui.NewStatic(wnd, ui.OptsStatic().Text("Open Settings, enter server details, then click Get capabilities of the server.").Position(ui.Dpi(220, 560)).Size(ui.Dpi(940, 22)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("05  EXECUTION RESULTS").Position(ui.Dpi(220, 806)).Size(ui.Dpi(200, 18)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("04  EXECUTION RESULTS").Position(ui.Dpi(220, 586)).Size(ui.Dpi(200, 18)))
 	results := ui.NewListView(wnd, ui.OptsListView().
-		Position(ui.Dpi(220, 832)).Size(ui.Dpi(940, 184)).
+		Position(ui.Dpi(220, 612)).Size(ui.Dpi(940, 86)).
 		CtrlExStyle(co.LVS_EX_FULLROWSELECT|co.LVS_EX_GRIDLINES).
 		Column("Request", ui.DpiX(190)).Column("Method", ui.DpiX(90)).Column("Status", ui.DpiX(90)).Column("Duration", ui.DpiX(120)).Column("URL", ui.DpiX(420)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("06  ACTIVITY LOG").Position(ui.Dpi(220, 1034)).Size(ui.Dpi(180, 18)))
-	log := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 1060)).Width(ui.DpiX(940)).Height(ui.DpiY(48)).
+	ui.NewStatic(wnd, ui.OptsStatic().Text("05  ACTIVITY LOG").Position(ui.Dpi(220, 706)).Size(ui.Dpi(180, 18)))
+	log := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 730)).Width(ui.DpiX(940)).Height(ui.DpiY(24)).
 		CtrlStyle(co.ES_MULTILINE|co.ES_AUTOVSCROLL|co.ES_READONLY|co.ES_WANTRETURN).
 		WndStyle(co.WS_CHILD|co.WS_VISIBLE|co.WS_VSCROLL|co.WS_TABSTOP))
 
-	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, queue: queue, pageSize: pageSize, resolution: resolution, colorMode: colorMode, mediaType: mediaType, printSpeed: printSpeed, multiSelects: multiSelects, multiSelectValues: map[string][]string{}, runMode: runMode, strategy: strategy, maxCases: maxCases, concurrency: concurrency, runButton: runButton, captureButton: captureButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status}
+	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, queue: queue, pageSize: pageSize, resolution: resolution, colorMode: colorMode, mediaType: mediaType, printSpeed: printSpeed, multiSelects: multiSelects, multiSelectValues: map[string][]string{}, runMode: runMode, strategy: strategy, maxCases: maxCases, concurrency: concurrency, runButton: runButton, captureButton: captureButton, settingsButton: settingsButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status, progress: progress, settingsCtrls: settingsCtrls, capabilityCtrls: capabilityCtrls}
 	mw.events()
 	return wnd.RunAsMain()
 }
 
-func buildMultiSelectControls(wnd *ui.Main) map[string][]*ui.CheckBox {
+func buildMultiSelectControls(wnd *ui.Main) (map[string][]*ui.CheckBox, []hwndControl) {
 	defs := []struct {
 		id    string
 		label string
 		x, y  int
 	}{
-		{id: "PageSize", label: "Page size", x: 220, y: 646},
-		{id: "EFResolution", label: "Resolution", x: 410, y: 646},
-		{id: "EFColorMode", label: "Color mode", x: 600, y: 646},
-		{id: "EFMediaType", label: "Media type", x: 790, y: 646},
-		{id: "EFPrintSpeed", label: "Print speed", x: 980, y: 646},
+		{id: "PageSize", label: "Page size", x: 220, y: 486},
+		{id: "EFResolution", label: "Resolution", x: 410, y: 486},
+		{id: "EFColorMode", label: "Color mode", x: 600, y: 486},
+		{id: "EFMediaType", label: "Media type", x: 790, y: 486},
+		{id: "EFPrintSpeed", label: "Print speed", x: 980, y: 486},
 	}
 	controls := make(map[string][]*ui.CheckBox, len(defs))
+	var handles []hwndControl
 	for _, def := range defs {
-		ui.NewStatic(wnd, ui.OptsStatic().Text(def.label).Position(ui.Dpi(def.x, def.y)).Size(ui.Dpi(150, 18)))
+		label := ui.NewStatic(wnd, ui.OptsStatic().Text(def.label).Position(ui.Dpi(def.x, def.y)).Size(ui.Dpi(150, 18)))
+		handles = append(handles, label)
 		for i := 0; i < 4; i++ {
 			chk := ui.NewCheckBox(wnd, ui.OptsCheckBox().Text("-").Position(ui.Dpi(def.x, def.y+24+(i*22))).Size(ui.Dpi(178, 20)))
+			handles = append(handles, chk)
 			controls[def.id] = append(controls[def.id], chk)
 		}
 	}
-	return controls
+	return controls, handles
 }
 
 func (m *MainWindow) events() {
 	m.wnd.On().WmCreate(func(_ ui.WmCreate) int {
 		m.expandComboDropDowns()
+		m.showControls(m.settingsCtrls, false)
+		m.showControls(m.capabilityCtrls, false)
+		m.progress.Hwnd().ShowWindow(co.SW_HIDE)
 		return 0
 	})
 	m.runButton.On().BnClicked(func() { m.startRun() })
 	m.captureButton.On().BnClicked(func() { m.captureCapabilities() })
+	m.settingsButton.On().BnClicked(func() { m.toggleSettings() })
 	m.cancelButton.On().BnClicked(func() { m.cancelRun() })
 	m.browseFolder.On().BnClicked(func() {
 		path, err := browsePath(m.wnd.Hwnd(), true)
@@ -207,6 +250,21 @@ func (m *MainWindow) events() {
 		m.cancelRun()
 		_ = m.wnd.Hwnd().DestroyWindow()
 	})
+}
+
+func (m *MainWindow) showControls(handles []hwndControl, visible bool) {
+	cmd := co.SW_HIDE
+	if visible {
+		cmd = co.SW_SHOW
+	}
+	for _, ctrl := range handles {
+		ctrl.Hwnd().ShowWindow(cmd)
+	}
+}
+
+func (m *MainWindow) toggleSettings() {
+	m.settingsVisible = !m.settingsVisible
+	m.showControls(m.settingsCtrls, m.settingsVisible)
 }
 
 func (m *MainWindow) startRun() {
@@ -284,14 +342,21 @@ func (m *MainWindow) captureCapabilities() {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.running.Store(true)
-	m.setStatus("Capturing Fiery API v5 capabilities...")
+	m.showControls(m.capabilityCtrls, false)
+	m.progress.Hwnd().ShowWindow(co.SW_SHOW)
+	m.progress.SetMarquee(true)
+	m.setStatus("Getting capabilities from the server...")
 	m.appendLog("Starting v5 capability capture for %s", server.IPAddress)
 	go m.runCapabilityCapture(ctx, server)
 }
 
 func (m *MainWindow) runCapabilityCapture(ctx context.Context, server model.ServerConnection) {
 	defer func() {
-		m.wnd.UiThread(func() { m.running.Store(false) })
+		m.wnd.UiThread(func() {
+			m.progress.SetMarquee(false)
+			m.progress.Hwnd().ShowWindow(co.SW_HIDE)
+			m.running.Store(false)
+		})
 	}()
 	client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
 	if err != nil {
@@ -325,6 +390,7 @@ func (m *MainWindow) runCapabilityCapture(ctx context.Context, server model.Serv
 		}
 		m.capabilities = capabilityModel
 		m.populateCapabilities(capabilityModel)
+		m.showControls(m.capabilityCtrls, true)
 		m.setStatus("Capability capture saved and UI populated from server response. Preflight: " + environmentSnapshot.OverallStatus)
 		m.appendLog("Captured %d v4/v5 endpoint response(s)", len(snapshot.Endpoints))
 		m.appendLog("Preflight checks: passed=%d failed=%d status=%s", environmentSnapshot.Summary.PassedChecks, environmentSnapshot.Summary.FailedChecks, environmentSnapshot.OverallStatus)
