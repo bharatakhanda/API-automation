@@ -13,6 +13,7 @@ import (
 )
 
 var V5DiscoveryEndpoints = []DiscoveryEndpoint{
+	{Name: "info", Method: http.MethodGet, Path: apiV5 + "/info"},
 	{Name: "properties", Method: http.MethodGet, Path: apiV5 + "/properties"},
 	{Name: "jobs", Method: http.MethodGet, Path: apiV5 + "/jobs"},
 	{Name: "queues", Method: http.MethodGet, Path: apiV5 + "/queues"},

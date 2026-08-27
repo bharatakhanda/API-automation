@@ -119,8 +119,8 @@ Useful behavior incorporated into the Go application:
 - Import form fields:
   - `file`: selected test file.
   - `queue`: `hold`.
-- Keep-alive/status check uses `GET /live/api/v5/status`.
-- Capability capture saves snapshots next to the EXE under `captures/server-capabilities-snapshot-YYYYMMDD-HHMMSS.json`.
+- Keep-alive/status check uses `GET /live/api/v5/info`, matching the v5 import reference flow.
+- Capability capture includes `GET /live/api/v5/info` and saves snapshots next to the EXE under `captures/server-capabilities-snapshot-YYYYMMDD-HHMMSS.json`.
 - Snapshot files must not include the secret key, password, or session cookie.
 - Fiery installations may use self-signed certificates, so the server client supports controlled insecure TLS for this environment.
 - Job operation endpoints available for future workflow steps should use v5 paths, for example:

@@ -131,7 +131,7 @@ func (c *Client) Login(ctx context.Context) (Session, error) {
 }
 
 func (c *Client) KeepAlive(ctx context.Context, session Session) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+apiV5+"/status", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+apiV5+"/info", nil)
 	if err != nil {
 		return err
 	}
