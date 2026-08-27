@@ -74,15 +74,18 @@ type Window struct {
 	strategy      combinations.Strategy
 	runModeIndex  int
 
-	capabilities capabilities.Model
-	selected     map[string]map[string]*widget.Bool
-	mu           sync.Mutex
-	log          []string
-	results      []resultRow
-	status       string
-	running      atomic.Bool
-	cancel       context.CancelFunc
-	diagnostic   *diagnosticLog
+	capabilities    capabilities.Model
+	selected        map[string]map[string]*widget.Bool
+	mu              sync.Mutex
+	log             []string
+	results         []resultRow
+	status          string
+	captureActive   bool
+	captureProgress float32
+	capturePhase    string
+	running         atomic.Bool
+	cancel          context.CancelFunc
+	diagnostic      *diagnosticLog
 }
 
 type resultRow struct{ File, Method, Status, Duration, Detail string }
@@ -325,12 +328,41 @@ func (w *Window) modeSelector(gtx layout.Context) layout.Dimensions {
 func (w *Window) capabilitiesCard(gtx layout.Context) layout.Dimensions {
 	w.mu.Lock()
 	model := w.capabilities
+	active := w.captureActive
 	w.mu.Unlock()
 	return card(gtx, func(gtx layout.Context) layout.Dimensions {
 		if len(model.Options) == 0 && len(model.Queues) == 0 {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(sectionTitle(w.theme, "03 Server capabilities")), layout.Rigid(spacer(10)), layout.Rigid(label(w.theme, "Click Get server capabilities. Options will appear here after the server responds.", 14, palette.muted).Layout))
+			children := []layout.FlexChild{layout.Rigid(sectionTitle(w.theme, "03 Server capabilities")), layout.Rigid(spacer(10))}
+			if active {
+				children = append(children, layout.Rigid(w.captureProgressPanel), layout.Rigid(spacer(10)))
+			}
+			children = append(children, layout.Rigid(label(w.theme, "Click Get server capabilities. Options will appear here after the server responds.", 14, palette.muted).Layout))
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 		}
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(sectionTitle(w.theme, fmt.Sprintf("03 Server capabilities · %s", fallback(model.ServerName, "discovered")))), layout.Rigid(spacer(10)), layout.Rigid(w.strategySelector), layout.Rigid(spacer(12)), layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionGrid(gtx, model) }))
+		children := []layout.FlexChild{layout.Rigid(sectionTitle(w.theme, fmt.Sprintf("03 Server capabilities · %s", fallback(model.ServerName, "discovered")))), layout.Rigid(spacer(10))}
+		if active {
+			children = append(children, layout.Rigid(w.captureProgressPanel), layout.Rigid(spacer(10)))
+		}
+		children = append(children, layout.Rigid(w.strategySelector), layout.Rigid(spacer(12)), layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionGrid(gtx, model) }))
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	})
+}
+
+func (w *Window) captureProgressPanel(gtx layout.Context) layout.Dimensions {
+	w.mu.Lock()
+	phase := w.capturePhase
+	progress := w.captureProgress
+	w.mu.Unlock()
+	if phase == "" {
+		phase = "Getting capabilities from server..."
+	}
+	bar := material.ProgressBar(w.theme, progress)
+	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(label(w.theme, phase, 14, palette.primary).Layout),
+			layout.Rigid(spacer(8)),
+			layout.Rigid(bar.Layout),
+		)
 	})
 }
 
@@ -468,22 +500,31 @@ func (w *Window) captureCapabilities() {
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
 	w.running.Store(true)
+	w.setCaptureProgress(true, 0.05, "Preparing server capability capture...")
 	w.setStatus("Getting capabilities from server...")
 	go func() {
-		defer w.running.Store(false)
+		defer func() {
+			w.running.Store(false)
+			w.setCaptureProgress(false, 1, "Capability capture finished")
+		}()
+		w.setCaptureProgress(true, 0.15, "Creating Fiery API client...")
 		client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
 		if err != nil {
 			w.setStatus("Server configuration invalid: " + err.Error())
 			return
 		}
+		w.setCaptureProgress(true, 0.30, "Authenticating with Fiery server...")
 		session, err := client.Login(ctx)
 		if err != nil {
 			w.setStatus("Login failed: " + err.Error())
 			return
 		}
+		w.setCaptureProgress(true, 0.45, "Discovering v5/v4 server endpoints and properties...")
 		snap := client.DiscoverCapabilities(ctx, session)
+		w.setCaptureProgress(true, 0.75, "Normalizing capabilities and running preflight checks...")
 		model := capabilities.FromSnapshot(snap)
 		env := preflight.Run(snap, model)
+		w.setCaptureProgress(true, 0.90, "Saving capability and environment snapshots...")
 		path, err := client.SaveCapabilitySnapshot(snap, captureDirectory())
 		if err != nil {
 			w.addLog("Capability snapshot save failed: %s", err)
@@ -491,10 +532,35 @@ func (w *Window) captureCapabilities() {
 		w.mu.Lock()
 		w.capabilities = model
 		w.mu.Unlock()
+		w.setCaptureProgress(true, 1.0, "Capabilities loaded successfully.")
 		w.setStatus("Capabilities loaded. Preflight: " + env.OverallStatus)
 		w.logCapabilitySummary(model)
 		w.addLog("Saved capability snapshot: %s", path)
 	}()
+}
+
+func (w *Window) setCaptureProgress(active bool, progress float32, phase string) {
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 1 {
+		progress = 1
+	}
+	w.mu.Lock()
+	w.captureActive = active
+	w.captureProgress = progress
+	w.capturePhase = phase
+	w.mu.Unlock()
+	if phase != "" {
+		w.diagnostic.printf("CAPTURE: %.0f%% %s", progress*100, phase)
+	}
+	w.window.Invalidate()
+}
+
+func (w *Window) isCaptureActive() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.captureActive
 }
 
 func (w *Window) logCapabilitySummary(model capabilities.Model) {
