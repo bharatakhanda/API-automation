@@ -66,10 +66,12 @@ type MainWindow struct {
 	settingsCtrls     []hwndControl
 	capabilityCtrls   []hwndControl
 	settingsVisible   bool
+	theme             appTheme
 
-	capabilities capabilities.Model
-	cancel       context.CancelFunc
-	running      atomic.Bool
+	capabilities   capabilities.Model
+	cancel         context.CancelFunc
+	running        atomic.Bool
+	closeRequested atomic.Bool
 }
 
 func Run() int {
@@ -215,7 +217,8 @@ func buildMultiSelectControls(wnd *ui.Main) (map[string][]*ui.CheckBox, []hwndCo
 }
 
 func (m *MainWindow) events() {
-	newAppTheme().apply(m)
+	m.theme = newAppTheme()
+	m.theme.apply(m)
 	m.wnd.On().WmCreate(func(_ ui.WmCreate) int {
 		_ = m.wnd.Hwnd().DwmSetWindowAttribute(win.DwmAttrCaptionColor(win.RGB(9, 30, 66)))
 		_ = m.wnd.Hwnd().DwmSetWindowAttribute(win.DwmAttrTextColor(win.RGB(255, 255, 255)))
@@ -250,10 +253,28 @@ func (m *MainWindow) events() {
 			m.filePath.SetText(path)
 		}
 	})
-	m.wnd.On().WmClose(func() {
-		m.cancelRun()
-		_ = m.wnd.Hwnd().DestroyWindow()
+	m.wnd.On().Wm(co.WM_CLOSE, func(_ ui.Wm) uintptr {
+		if m.running.Load() {
+			m.closeRequested.Store(true)
+			m.cancelRun()
+			m.setStatus("Cancellation requested. Waiting for running work to stop before closing...")
+			return 0
+		}
+		m.destroyWindow()
+		return 0
 	})
+}
+
+func (m *MainWindow) destroyWindow() {
+	m.theme.dispose()
+	_ = m.wnd.Hwnd().DestroyWindow()
+}
+
+func (m *MainWindow) finishAsyncWork() {
+	m.running.Store(false)
+	if m.closeRequested.Load() {
+		m.destroyWindow()
+	}
 }
 
 func (m *MainWindow) showControls(handles []hwndControl, visible bool) {
@@ -359,7 +380,7 @@ func (m *MainWindow) runCapabilityCapture(ctx context.Context, server model.Serv
 		m.wnd.UiThread(func() {
 			m.progress.SetMarquee(false)
 			m.progress.Hwnd().ShowWindow(co.SW_HIDE)
-			m.running.Store(false)
+			m.finishAsyncWork()
 		})
 	}()
 	client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
@@ -646,7 +667,7 @@ type testJob struct {
 
 func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, combos []combinations.Combination, mode runMode) {
 	defer func() {
-		m.wnd.UiThread(func() { m.running.Store(false) })
+		m.wnd.UiThread(func() { m.finishAsyncWork() })
 	}()
 
 	client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
