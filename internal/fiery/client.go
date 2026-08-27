@@ -213,6 +213,36 @@ func (c *Client) ImportJob(ctx context.Context, session Session, filePath string
 	return result, nil
 }
 
+func (c *Client) UpdateJobAttributes(ctx context.Context, session Session, jobID string, attributes map[string]string) error {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return errors.New("job ID is required")
+	}
+	if len(attributes) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(map[string]map[string]string{"attributes": attributes})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+apiV5+"/jobs/"+url.PathEscape(jobID), bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Cookie", session.Cookie)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("job attribute update failed with HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (c *Client) JobAction(ctx context.Context, session Session, jobID, action string) error {
 	jobID = strings.TrimSpace(jobID)
 	action = strings.Trim(strings.TrimSpace(action), "/")

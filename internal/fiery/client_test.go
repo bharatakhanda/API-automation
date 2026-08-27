@@ -13,6 +13,7 @@ import (
 func TestLoginAndImportJob(t *testing.T) {
 	var sawLogin bool
 	var sawImport bool
+	var sawUpdate bool
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case apiV5 + "/login":
@@ -29,6 +30,12 @@ func TestLoginAndImportJob(t *testing.T) {
 			}
 			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
 			_, _ = w.Write([]byte(`{"data":{"item":{"authenticated":true}}}`))
+		case apiV5 + "/jobs/JOB-123":
+			sawUpdate = true
+			if r.Method != http.MethodPost {
+				t.Fatalf("update method = %s", r.Method)
+			}
+			_, _ = w.Write([]byte(`{"ok":true}`))
 		case apiV5 + "/jobs":
 			sawImport = true
 			if got := r.Header.Get("Cookie"); got != "session=abc" {
@@ -67,7 +74,10 @@ func TestLoginAndImportJob(t *testing.T) {
 	if result.JobID != "JOB-123" {
 		t.Fatalf("job ID = %q", result.JobID)
 	}
-	if !sawLogin || !sawImport {
-		t.Fatalf("sawLogin=%v sawImport=%v", sawLogin, sawImport)
+	if err := client.UpdateJobAttributes(context.Background(), session, result.JobID, map[string]string{"EFResolution": "360x720dpi"}); err != nil {
+		t.Fatal(err)
+	}
+	if !sawLogin || !sawImport || !sawUpdate {
+		t.Fatalf("sawLogin=%v sawImport=%v sawUpdate=%v", sawLogin, sawImport, sawUpdate)
 	}
 }
