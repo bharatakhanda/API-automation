@@ -445,10 +445,20 @@ func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.Server
 			defer wg.Done()
 			for file := range jobs {
 				result, err := client.ImportJob(ctx, session, file)
-				if err == nil && result.JobID != "" {
-					err = client.UpdateJobAttributes(ctx, session, result.JobID, attributes)
+				verification := attributeVerification{Passed: len(attributes) > 0}
+				if err == nil && result.JobID != "" && len(attributes) > 0 {
+					if updateErr := client.UpdateJobAttributes(ctx, session, result.JobID, attributes); updateErr != nil {
+						err = updateErr
+					} else {
+						actual, getErr := client.GetJobAttributes(ctx, session, result.JobID)
+						if getErr != nil {
+							err = getErr
+						} else {
+							verification = verifyAttributes(attributes, actual)
+						}
+					}
 				}
-				res := importResultToModel(result, err)
+				res := importResultToModel(result, err, verification)
 				select {
 				case results <- res:
 				case <-ctx.Done():
@@ -472,9 +482,17 @@ func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.Server
 		close(results)
 	}()
 
-	count := 0
+	count, passed, failed, errored := 0, 0, 0, 0
 	for res := range results {
 		count++
+		switch {
+		case res.Error != "":
+			errored++
+		case strings.HasPrefix(res.BodyPreview, "PASS:"):
+			passed++
+		case strings.HasPrefix(res.BodyPreview, "FAIL:"):
+			failed++
+		}
 		res := res
 		m.wnd.UiThread(func() { m.addResult(res) })
 	}
@@ -484,12 +502,31 @@ func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.Server
 			m.appendLog("Automation cancelled")
 			return
 		}
-		m.setStatus(fmt.Sprintf("Completed. %d file import result(s).", count))
-		m.appendLog("Server automation finished")
+		m.setStatus(fmt.Sprintf("Completed. total=%d pass=%d fail=%d error=%d", count, passed, failed, errored))
+		m.appendLog("Server automation finished: total=%d pass=%d fail=%d error=%d", count, passed, failed, errored)
 	})
 }
 
-func importResultToModel(result fiery.ImportResult, err error) model.Result {
+type attributeVerification struct {
+	Passed   bool
+	Expected map[string]string
+	Actual   map[string]string
+	Failures []string
+}
+
+func verifyAttributes(expected, actual map[string]string) attributeVerification {
+	verification := attributeVerification{Passed: true, Expected: expected, Actual: actual}
+	for key, expectedValue := range expected {
+		actualValue, ok := actual[key]
+		if !ok || strings.TrimSpace(actualValue) != strings.TrimSpace(expectedValue) {
+			verification.Passed = false
+			verification.Failures = append(verification.Failures, fmt.Sprintf("%s expected=%q actual=%q", key, expectedValue, actualValue))
+		}
+	}
+	return verification
+}
+
+func importResultToModel(result fiery.ImportResult, err error, verification attributeVerification) model.Result {
 	res := model.Result{
 		RequestID:   result.JobID,
 		RequestName: filepath.Base(result.FilePath),
@@ -500,7 +537,11 @@ func importResultToModel(result fiery.ImportResult, err error) model.Result {
 		CompletedAt: time.Now(),
 	}
 	if result.JobID != "" {
-		res.BodyPreview = "Imported job " + result.JobID
+		if verification.Passed {
+			res.BodyPreview = "PASS: set values match get values for job " + result.JobID
+		} else {
+			res.BodyPreview = "FAIL: " + strings.Join(verification.Failures, "; ")
+		}
 	}
 	if err != nil {
 		res.Error = err.Error()
@@ -510,6 +551,12 @@ func importResultToModel(result fiery.ImportResult, err error) model.Result {
 
 func (m *MainWindow) addResult(res model.Result) {
 	status := strconv.Itoa(res.StatusCode)
+	if strings.HasPrefix(res.BodyPreview, "PASS:") {
+		status = "PASS"
+	}
+	if strings.HasPrefix(res.BodyPreview, "FAIL:") {
+		status = "FAIL"
+	}
 	if res.Error != "" {
 		status = "ERR"
 	}
@@ -518,7 +565,10 @@ func (m *MainWindow) addResult(res model.Result) {
 		m.appendLog("%s failed: %s", res.RequestName, res.Error)
 		return
 	}
-	m.appendLog("%s %s -> %d in %s", res.Method, res.URL, res.StatusCode, res.Duration.Round(time.Millisecond))
+	if res.BodyPreview != "" {
+		m.appendLog("%s", res.BodyPreview)
+	}
+	m.appendLog("%s %s -> %s in %s", res.Method, res.URL, status, res.Duration.Round(time.Millisecond))
 }
 
 func (m *MainWindow) selectedFileMode() model.FileSelectionMode {
