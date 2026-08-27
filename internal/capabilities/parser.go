@@ -29,12 +29,15 @@ func FromSnapshot(snapshot fiery.CapabilitySnapshot) Model {
 	model := Model{}
 	for _, endpoint := range snapshot.Endpoints {
 		switch endpoint.Name {
-		case "info":
+		case "info", "v5_info", "v4_info":
 			applyInfo(&model, endpoint.Body)
-		case "queues":
+		case "queues", "v5_queues":
 			model.Queues = parseQueues(endpoint.Body)
-		case "properties":
-			model.Options = parseProperties(endpoint.Body)
+		case "properties", "v5_properties", "v4_properties":
+			options := parseProperties(endpoint.Body)
+			if len(options) > len(model.Options) {
+				model.Options = options
+			}
 		}
 	}
 	sort.Slice(model.Queues, func(i, j int) bool {
