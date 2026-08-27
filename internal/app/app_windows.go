@@ -43,6 +43,7 @@ type MainWindow struct {
 	colorMode     *ui.ComboBox
 	mediaType     *ui.ComboBox
 	printSpeed    *ui.ComboBox
+	runMode       *ui.ComboBox
 	concurrency   *ui.Edit
 	runButton     *ui.Button
 	captureButton *ui.Button
@@ -104,6 +105,8 @@ func Run() int {
 	url := ui.NewEdit(wnd, ui.OptsEdit().Text("/live/api/v5/jobs").Position(ui.Dpi(336, 432)).Width(ui.DpiX(610)).Height(ui.DpiY(26)))
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Workers").Position(ui.Dpi(970, 408)).Size(ui.Dpi(90, 20)))
 	concurrency := ui.NewEdit(wnd, ui.OptsEdit().Text("1").Position(ui.Dpi(970, 432)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Run mode").Position(ui.Dpi(1064, 408)).Size(ui.Dpi(90, 20)))
+	runMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(1064, 432)).Width(ui.DpiX(132)).Texts("Hold", "Process and Hold", "RIP", "Press Print", "Ready to Print", "Print").Select(0))
 
 	ui.NewStatic(wnd, ui.OptsStatic().Text("04  SERVER CAPABILITIES").Position(ui.Dpi(220, 476)).Size(ui.Dpi(220, 18)))
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Queue").Position(ui.Dpi(220, 478+0)).Size(ui.Dpi(90, 20)))
@@ -132,7 +135,7 @@ func Run() int {
 		CtrlStyle(co.ES_MULTILINE|co.ES_AUTOVSCROLL|co.ES_READONLY|co.ES_WANTRETURN).
 		WndStyle(co.WS_CHILD|co.WS_VISIBLE|co.WS_VSCROLL|co.WS_TABSTOP))
 
-	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, queue: queue, pageSize: pageSize, resolution: resolution, colorMode: colorMode, mediaType: mediaType, printSpeed: printSpeed, concurrency: concurrency, runButton: runButton, captureButton: captureButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status}
+	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, queue: queue, pageSize: pageSize, resolution: resolution, colorMode: colorMode, mediaType: mediaType, printSpeed: printSpeed, runMode: runMode, concurrency: concurrency, runButton: runButton, captureButton: captureButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status}
 	mw.events()
 	return wnd.RunAsMain()
 }
@@ -203,13 +206,14 @@ func (m *MainWindow) startRun() {
 	m.cancel = cancel
 	m.running.Store(true)
 	attributes := m.selectedJobAttributes()
-	combos := combinations.Generate([]combinations.Axis{attributesToAxis(attributes)}, 1)
+	mode := m.selectedRunMode()
+	combos := combinations.Generate([]combinations.Axis{attributesToAxis(attributes), combinations.Axis{Name: "RunMode", Values: []string{mode.Label}}}, 1)
 	m.results.DeleteAllItems()
 	m.setStatus("Connecting to Fiery server " + server.IPAddress + "...")
-	m.appendLog("Starting server automation with %d worker(s), %d selected test file(s), %d selected job attribute(s)", workers, len(selectedFiles), len(attributes))
+	m.appendLog("Starting server automation with %d worker(s), %d selected test file(s), %d selected job attribute(s), mode=%s", workers, len(selectedFiles), len(attributes), mode.Label)
 	m.appendLog("Generated %d executable test combination(s) from current UI selections", len(combos))
 
-	go m.runFieryAutomation(ctx, server, selectedFiles, workers, attributes)
+	go m.runFieryAutomation(ctx, server, selectedFiles, workers, attributes, mode)
 }
 
 func (m *MainWindow) serverConnection() (model.ServerConnection, bool) {
@@ -332,6 +336,7 @@ func (m *MainWindow) expandComboDropDowns() {
 	m.setComboDropDownHeight(m.colorMode, 150)
 	m.setComboDropDownHeight(m.mediaType, 260)
 	m.setComboDropDownHeight(m.printSpeed, 150)
+	m.setComboDropDownHeight(m.runMode, 180)
 }
 
 func (m *MainWindow) setComboDropDownHeight(combo *ui.ComboBox, width int) {
@@ -405,7 +410,32 @@ func fallback(value, fallback string) string {
 	return value
 }
 
-func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, attributes map[string]string) {
+type runMode struct {
+	Label       string
+	ImportQueue string
+	Actions     []string
+}
+
+func (m *MainWindow) selectedRunMode() runMode { return runModeForIndex(m.runMode.SelectedIndex()) }
+
+func runModeForIndex(index int) runMode {
+	switch index {
+	case 1:
+		return runMode{Label: "Process and Hold", ImportQueue: "hold", Actions: []string{"rip"}}
+	case 2:
+		return runMode{Label: "RIP", ImportQueue: "hold", Actions: []string{"rip"}}
+	case 3:
+		return runMode{Label: "Press Print", ImportQueue: "hold", Actions: []string{"press_print"}}
+	case 4:
+		return runMode{Label: "Ready to Print", ImportQueue: "hold", Actions: []string{"press_print"}}
+	case 5:
+		return runMode{Label: "Print", ImportQueue: "print", Actions: []string{"print"}}
+	default:
+		return runMode{Label: "Hold", ImportQueue: "hold"}
+	}
+}
+
+func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, attributes map[string]string, mode runMode) {
 	defer func() {
 		m.wnd.UiThread(func() { m.running.Store(false) })
 	}()
@@ -444,17 +474,22 @@ func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.Server
 		go func() {
 			defer wg.Done()
 			for file := range jobs {
-				result, err := client.ImportJob(ctx, session, file)
-				verification := attributeVerification{Passed: len(attributes) > 0}
-				if err == nil && result.JobID != "" && len(attributes) > 0 {
-					if updateErr := client.UpdateJobAttributes(ctx, session, result.JobID, attributes); updateErr != nil {
-						err = updateErr
-					} else {
+				result, err := client.ImportJobToQueue(ctx, session, file, mode.ImportQueue)
+				verification := attributeVerification{Passed: len(attributes) == 0, Mode: mode.Label}
+				if err == nil && result.JobID != "" {
+					if len(attributes) > 0 {
+						err = client.UpdateJobAttributes(ctx, session, result.JobID, attributes)
+					}
+					if err == nil {
+						err = runJobActions(ctx, client, session, result.JobID, mode)
+					}
+					if err == nil && len(attributes) > 0 {
 						actual, getErr := client.GetJobAttributes(ctx, session, result.JobID)
 						if getErr != nil {
 							err = getErr
 						} else {
 							verification = verifyAttributes(attributes, actual)
+							verification.Mode = mode.Label
 						}
 					}
 				}
@@ -507,8 +542,18 @@ func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.Server
 	})
 }
 
+func runJobActions(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, mode runMode) error {
+	for _, action := range mode.Actions {
+		if err := client.JobAction(ctx, session, jobID, action); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type attributeVerification struct {
 	Passed   bool
+	Mode     string
 	Expected map[string]string
 	Actual   map[string]string
 	Failures []string
@@ -538,9 +583,9 @@ func importResultToModel(result fiery.ImportResult, err error, verification attr
 	}
 	if result.JobID != "" {
 		if verification.Passed {
-			res.BodyPreview = "PASS: set values match get values for job " + result.JobID
+			res.BodyPreview = "PASS: mode=" + verification.Mode + "; set values match get values for job " + result.JobID
 		} else {
-			res.BodyPreview = "FAIL: " + strings.Join(verification.Failures, "; ")
+			res.BodyPreview = "FAIL: mode=" + verification.Mode + "; " + strings.Join(verification.Failures, "; ")
 		}
 	}
 	if err != nil {

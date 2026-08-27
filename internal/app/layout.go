@@ -27,6 +27,7 @@ func enterpriseLayoutRects() []uiRect {
 		{Name: "method", X: 220, Y: 432, W: 92, H: 26, Layer: "input"},
 		{Name: "url", X: 336, Y: 432, W: 610, H: 26, Layer: "input"},
 		{Name: "concurrency", X: 970, Y: 432, W: 76, H: 26, Layer: "input"},
+		{Name: "runMode", X: 1064, Y: 432, W: 132, H: 26, Layer: "input"},
 		{Name: "queue", X: 220, Y: 502, W: 190, H: 26, Layer: "input"},
 		{Name: "pageSize", X: 432, Y: 502, W: 190, H: 26, Layer: "input"},
 		{Name: "resolution", X: 644, Y: 502, W: 150, H: 26, Layer: "input"},
