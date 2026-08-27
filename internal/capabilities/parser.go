@@ -59,6 +59,7 @@ func FromSnapshot(snapshot fiery.CapabilitySnapshot) Model {
 			}
 		}
 	}
+	model.Options = addSyntheticCopiesOption(model.Options)
 	sort.Slice(model.Queues, func(i, j int) bool {
 		if model.Queues[i].Available != model.Queues[j].Available {
 			return model.Queues[i].Available
@@ -141,6 +142,24 @@ func parseProperties(body json.RawMessage) []Option {
 			Enabled: len(values) > 0,
 		})
 	}
+	sort.Slice(options, func(i, j int) bool { return options[i].Label < options[j].Label })
+	return options
+}
+
+func addSyntheticCopiesOption(options []Option) []Option {
+	for _, option := range options {
+		if option.ID == "num copies" || option.ID == "EFCopies" {
+			return options
+		}
+	}
+	options = append(options, Option{
+		ID:      "num copies",
+		Label:   "Copies",
+		Value:   "1",
+		Values:  []string{"1", "2", "5", "10"},
+		Scopes:  []string{"command", "cws", "job", "manual-from-scope-guidance"},
+		Enabled: true,
+	})
 	sort.Slice(options, func(i, j int) bool { return options[i].Label < options[j].Label })
 	return options
 }

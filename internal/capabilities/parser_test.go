@@ -29,6 +29,10 @@ func TestFromSnapshotExtractsServerQueuesAndOptions(t *testing.T) {
 	if _, ok := model.OptionByID("Ignored"); ok {
 		t.Fatalf("ignored option should not be exposed")
 	}
+	copies, ok := model.OptionByID("num copies")
+	if !ok || copies.Label != "Copies" || len(copies.Values) == 0 {
+		t.Fatalf("expected synthetic copies option, got %#v", copies)
+	}
 }
 
 func TestCapturedSnapshotProducesUIPopulatableModel(t *testing.T) {
@@ -51,7 +55,7 @@ func TestCapturedSnapshotProducesUIPopulatableModel(t *testing.T) {
 	if len(model.Queues) == 0 {
 		t.Fatal("expected queues")
 	}
-	for _, id := range []string{"PageSize", "EFResolution", "EFColorMode", "EFMediaType", "EFPrintSpeed"} {
+	for _, id := range []string{"PageSize", "EFResolution", "EFColorMode", "EFMediaType", "EFPrintSpeed", "num copies"} {
 		option, ok := model.OptionByID(id)
 		if !ok || len(option.Values) == 0 {
 			t.Fatalf("expected option %s with values, got %#v", id, option)
