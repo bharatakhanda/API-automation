@@ -70,6 +70,7 @@ type Window struct {
 
 	capabilities capabilities.Model
 	selected     map[string]map[string]*widget.Bool
+	mu           sync.Mutex
 	log          []string
 	results      []resultRow
 	status       string
@@ -89,9 +90,9 @@ var runModes = []runMode{
 	{Label: "Hold", ImportQueue: "hold"},
 	{Label: "Process and Hold", ImportQueue: "hold", Actions: []string{"rip"}},
 	{Label: "RIP", ImportQueue: "hold", Actions: []string{"rip"}},
-	{Label: "Press Print", ImportQueue: "hold", Actions: []string{"press_print"}},
-	{Label: "Ready to Print", ImportQueue: "hold", Actions: []string{"press_print"}},
-	{Label: "Print", ImportQueue: "print", Actions: []string{"print"}},
+	{Label: "Press Print", ImportQueue: "hold", Actions: []string{"rip", "production", "press_print"}},
+	{Label: "Ready to Print", ImportQueue: "hold", Actions: []string{"rip", "production"}},
+	{Label: "Print", ImportQueue: "hold", Actions: []string{"rip", "production", "press_print", "print"}},
 }
 
 func New() *Window {
@@ -262,11 +263,14 @@ func (w *Window) modeSelector(gtx layout.Context) layout.Dimensions {
 }
 
 func (w *Window) capabilitiesCard(gtx layout.Context) layout.Dimensions {
+	w.mu.Lock()
+	model := w.capabilities
+	w.mu.Unlock()
 	return card(gtx, func(gtx layout.Context) layout.Dimensions {
-		if len(w.capabilities.Options) == 0 && len(w.capabilities.Queues) == 0 {
+		if len(model.Options) == 0 && len(model.Queues) == 0 {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(sectionTitle(w.theme, "03 Server capabilities")), layout.Rigid(spacer(10)), layout.Rigid(label(w.theme, "Click Get server capabilities. Options will appear here after the server responds.", 14, palette.muted).Layout))
 		}
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(sectionTitle(w.theme, fmt.Sprintf("03 Server capabilities · %s", fallback(w.capabilities.ServerName, "discovered")))), layout.Rigid(spacer(10)), layout.Rigid(w.strategySelector), layout.Rigid(spacer(12)), layout.Rigid(w.optionGrid))
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(sectionTitle(w.theme, fmt.Sprintf("03 Server capabilities · %s", fallback(model.ServerName, "discovered")))), layout.Rigid(spacer(10)), layout.Rigid(w.strategySelector), layout.Rigid(spacer(12)), layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionGrid(gtx, model) }))
 	})
 }
 
@@ -274,12 +278,12 @@ func (w *Window) strategySelector(gtx layout.Context) layout.Dimensions {
 	return row(gtx, toggle(w.theme, &w.selectedOnlyButton, "Selected only", w.strategy == combinations.StrategySelected), toggle(w.theme, &w.allPermButton, "All permutations", w.strategy == combinations.StrategyAll), toggle(w.theme, &w.pairwiseButton, "Pairwise", w.strategy == combinations.StrategyPairwise), field(w.theme, "Max cases", &w.maxCases, 110))
 }
 
-func (w *Window) optionGrid(gtx layout.Context) layout.Dimensions {
+func (w *Window) optionGrid(gtx layout.Context, model capabilities.Model) layout.Dimensions {
 	ids := []string{"PageSize", "EFResolution", "EFColorMode", "EFMediaType", "EFPrintSpeed"}
-	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, layout.Rigid(w.queueColumn), layout.Rigid(spacerX(12)), layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.queueColumn(gtx, model) }), layout.Rigid(spacerX(12)), layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 		children := make([]layout.FlexChild, 0, len(ids)*2)
 		for _, id := range ids {
-			opt, ok := w.capabilities.OptionByID(id)
+			opt, ok := model.OptionByID(id)
 			if !ok {
 				continue
 			}
@@ -288,9 +292,9 @@ func (w *Window) optionGrid(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
 	}))
 }
-func (w *Window) queueColumn(gtx layout.Context) layout.Dimensions {
+func (w *Window) queueColumn(gtx layout.Context, model capabilities.Model) layout.Dimensions {
 	items := []layout.FlexChild{layout.Rigid(label(w.theme, "Queue", 14, palette.muted).Layout)}
-	for _, q := range w.capabilities.Queues {
+	for _, q := range model.Queues {
 		if q.Available {
 			items = append(items, layout.Rigid(label(w.theme, q.Name, 13, palette.text).Layout))
 		}
@@ -319,13 +323,19 @@ func (w *Window) optionColumn(opt capabilities.Option) layout.Widget {
 }
 
 func (w *Window) resultsCard(gtx layout.Context) layout.Dimensions {
+	w.mu.Lock()
+	status := w.status
+	w.mu.Unlock()
 	return card(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(sectionTitle(w.theme, "04 Results and activity log")), layout.Rigid(spacer(8)), layout.Rigid(label(w.theme, w.status, 14, palette.primary).Layout), layout.Rigid(spacer(10)), layout.Rigid(w.resultsTable), layout.Rigid(spacer(10)), layout.Rigid(w.logPanel))
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(sectionTitle(w.theme, "04 Results and activity log")), layout.Rigid(spacer(8)), layout.Rigid(label(w.theme, status, 14, palette.primary).Layout), layout.Rigid(spacer(10)), layout.Rigid(w.resultsTable), layout.Rigid(spacer(10)), layout.Rigid(w.logPanel))
 	})
 }
 func (w *Window) resultsTable(gtx layout.Context) layout.Dimensions {
+	w.mu.Lock()
+	results := append([]resultRow(nil), w.results...)
+	w.mu.Unlock()
 	rows := []layout.FlexChild{layout.Rigid(label(w.theme, "Request                                              Method   Status   Duration   Detail", 13, palette.muted).Layout)}
-	for _, r := range w.results {
+	for _, r := range results {
 		rr := r
 		rows = append(rows, layout.Rigid(label(w.theme, fmt.Sprintf("%-48s %-7s %-8s %-9s %s", short(rr.File, 46), rr.Method, rr.Status, rr.Duration, short(rr.Detail, 80)), 13, palette.text).Layout))
 	}
@@ -334,7 +344,9 @@ func (w *Window) resultsTable(gtx layout.Context) layout.Dimensions {
 	})
 }
 func (w *Window) logPanel(gtx layout.Context) layout.Dimensions {
-	lines := w.log
+	w.mu.Lock()
+	lines := append([]string(nil), w.log...)
+	w.mu.Unlock()
 	if len(lines) > 8 {
 		lines = lines[len(lines)-8:]
 	}
@@ -379,7 +391,9 @@ func (w *Window) captureCapabilities() {
 		if err != nil {
 			w.addLog("Capability snapshot save failed: %s", err)
 		}
+		w.mu.Lock()
 		w.capabilities = model
+		w.mu.Unlock()
 		w.setStatus("Capabilities loaded. Preflight: " + env.OverallStatus)
 		w.addLog("Saved capability snapshot: %s", path)
 	}()
@@ -407,7 +421,9 @@ func (w *Window) startRun() {
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
 	w.running.Store(true)
+	w.mu.Lock()
 	w.results = nil
+	w.mu.Unlock()
 	w.setStatus("Running automation...")
 	go w.runAutomation(ctx, server, selectedFiles, workers, combos, mode)
 }
@@ -465,11 +481,16 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		w.addResult(file, "POST", "ERR", time.Since(start), err.Error())
 		return
 	}
+	w.addLog("Imported %s as job %s into queue %s", filepath.Base(file), imp.JobID, mode.ImportQueue)
 	if len(attrs) > 0 {
 		if err := client.UpdateJobAttributes(ctx, session, imp.JobID, attrs); err != nil {
 			w.addResult(file, "POST", "ERR", time.Since(start), err.Error())
 			return
 		}
+	}
+	if err := w.performModeLifecycle(ctx, client, session, imp.JobID, mode); err != nil {
+		w.addResult(file, "POST", "ERR", time.Since(start), err.Error())
+		return
 	}
 	got, err := client.GetJobAttributes(ctx, session, imp.JobID)
 	if err != nil {
@@ -486,6 +507,43 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		}
 	}
 	w.addResult(file, http.MethodPost, status, time.Since(start), detail)
+}
+
+func (w *Window) performModeLifecycle(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, mode runMode) error {
+	for _, action := range mode.Actions {
+		switch action {
+		case "rip":
+			w.addLog("Waiting for job %s status=done spooling before RIP", jobID)
+			if err := client.WaitJobAttribute(ctx, session, jobID, "status", "done spooling", 4*time.Minute, 2*time.Second); err != nil {
+				return err
+			}
+			w.addLog("Running RIP for job %s", jobID)
+			if err := client.JobAction(ctx, session, jobID, "rip"); err != nil {
+				return err
+			}
+		case "production":
+			w.addLog("Waiting for job %s status=done ripping before Ready to Print", jobID)
+			if err := client.WaitJobAttribute(ctx, session, jobID, "status", "done ripping", 6*time.Minute, 2*time.Second); err != nil {
+				return err
+			}
+			w.addLog("Moving job %s to production release state", jobID)
+			if err := client.UpdateJobAttributes(ctx, session, jobID, map[string]string{"job release state": "production"}); err != nil {
+				return err
+			}
+		case "press_print":
+			w.addLog("Running press_print for job %s", jobID)
+			if err := client.JobAction(ctx, session, jobID, "press_print"); err != nil {
+				return err
+			}
+		case "print":
+			time.Sleep(500 * time.Millisecond)
+			w.addLog("Running print for job %s", jobID)
+			if err := client.JobAction(ctx, session, jobID, "print"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (w *Window) server() (model.ServerConnection, bool) {
@@ -557,18 +615,24 @@ func optionValues(opt capabilities.Option) []string {
 }
 
 func (w *Window) setStatus(s string) {
+	w.mu.Lock()
 	w.status = s
+	w.mu.Unlock()
 	w.diagnostic.printf("STATUS: %s", s)
 	w.window.Invalidate()
 }
 func (w *Window) addLog(format string, args ...any) {
 	line := fmt.Sprintf(format, args...)
 	w.diagnostic.printf("UI: %s", line)
+	w.mu.Lock()
 	w.log = append(w.log, time.Now().Format("15:04:05  ")+line)
+	w.mu.Unlock()
 	w.window.Invalidate()
 }
 func (w *Window) addResult(file, method, status string, d time.Duration, detail string) {
+	w.mu.Lock()
 	w.results = append(w.results, resultRow{File: filepath.Base(file), Method: method, Status: status, Duration: d.Round(time.Millisecond).String(), Detail: detail})
+	w.mu.Unlock()
 	w.addLog("%s %s %s", filepath.Base(file), status, detail)
 }
 

@@ -262,6 +262,15 @@ func (c *Client) GetJobAttributes(ctx context.Context, session Session, jobID st
 }
 
 func (c *Client) UpdateJobAttributes(ctx context.Context, session Session, jobID string, attributes map[string]string) error {
+	if err := c.updateJobAttributes(ctx, session, apiV5, jobID, attributes); err == nil {
+		return nil
+	} else if fallbackErr := c.updateJobAttributes(ctx, session, apiV4, jobID, attributes); fallbackErr != nil {
+		return fmt.Errorf("v5 job attribute update failed: %w; v4 job attribute update failed: %w", err, fallbackErr)
+	}
+	return nil
+}
+
+func (c *Client) updateJobAttributes(ctx context.Context, session Session, apiPath, jobID string, attributes map[string]string) error {
 	jobID = strings.TrimSpace(jobID)
 	if jobID == "" {
 		return errors.New("job ID is required")
@@ -273,7 +282,7 @@ func (c *Client) UpdateJobAttributes(ctx context.Context, session Session, jobID
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+apiV5+"/jobs/"+url.PathEscape(jobID), bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+apiPath+"/jobs/"+url.PathEscape(jobID), bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -285,10 +294,38 @@ func (c *Client) UpdateJobAttributes(ctx context.Context, session Session, jobID
 		return err
 	}
 	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("job attribute update failed with HTTP %d", resp.StatusCode)
+		return fmt.Errorf("job attribute update %s/jobs/%s failed with HTTP %d: %s", apiPath, jobID, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
+}
+
+func (c *Client) WaitJobAttribute(ctx context.Context, session Session, jobID, key, want string, timeout, interval time.Duration) error {
+	if timeout <= 0 {
+		timeout = 2 * time.Minute
+	}
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		attrs, err := c.GetJobAttributes(ctx, session, jobID)
+		if err == nil && strings.EqualFold(strings.TrimSpace(attrs[key]), strings.TrimSpace(want)) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			if err != nil {
+				return fmt.Errorf("wait for job %s %s=%q timed out after %s; last GET error: %w", jobID, key, want, timeout, err)
+			}
+			return fmt.Errorf("wait for job %s %s=%q timed out after %s", jobID, key, want, timeout)
+		case <-ticker.C:
+		}
+	}
 }
 
 func (c *Client) JobAction(ctx context.Context, session Session, jobID, action string) error {
