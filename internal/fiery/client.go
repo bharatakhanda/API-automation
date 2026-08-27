@@ -173,6 +173,18 @@ func (c *Client) ImportJob(ctx context.Context, session Session, filePath string
 }
 
 func (c *Client) ImportJobToQueue(ctx context.Context, session Session, filePath, queue string) (ImportResult, error) {
+	result, err := c.importJobToQueue(ctx, session, filePath, queue, apiV5)
+	if err == nil {
+		return result, nil
+	}
+	fallback, fallbackErr := c.importJobToQueue(ctx, session, filePath, queue, apiV4)
+	if fallbackErr == nil {
+		return fallback, nil
+	}
+	return result, fmt.Errorf("v5 import failed: %w; v4 import failed: %w", err, fallbackErr)
+}
+
+func (c *Client) importJobToQueue(ctx context.Context, session Session, filePath, queue, apiPath string) (ImportResult, error) {
 	started := time.Now()
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -200,7 +212,8 @@ func (c *Client) ImportJobToQueue(ctx context.Context, session Session, filePath
 		return ImportResult{FilePath: filePath, Duration: time.Since(started)}, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+apiV5+"/jobs", &body)
+	endpoint := c.baseURL + apiPath + "/jobs"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &body)
 	if err != nil {
 		return ImportResult{FilePath: filePath, Duration: time.Since(started)}, err
 	}
@@ -210,13 +223,13 @@ func (c *Client) ImportJobToQueue(ctx context.Context, session Session, filePath
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return ImportResult{FilePath: filePath, Duration: time.Since(started)}, fmt.Errorf("import job request: %w", err)
+		return ImportResult{FilePath: filePath, Duration: time.Since(started)}, fmt.Errorf("import job request %s queue=%q file=%q: %w", apiPath, queue, filepath.Base(filePath), err)
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 	result := ImportResult{FilePath: filePath, StatusCode: resp.StatusCode, Duration: time.Since(started), RawBody: string(respBody), JobID: extractJobID(respBody)}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return result, fmt.Errorf("import failed with HTTP %d: %s", resp.StatusCode, strings.TrimSpace(result.RawBody))
+		return result, fmt.Errorf("import failed at %s with HTTP %d queue=%q file=%q: %s", apiPath+"/jobs", resp.StatusCode, queue, filepath.Base(filePath), strings.TrimSpace(result.RawBody))
 	}
 	return result, nil
 }

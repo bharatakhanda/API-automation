@@ -10,6 +10,47 @@ import (
 	"testing"
 )
 
+func TestImportJobFallsBackToV4(t *testing.T) {
+	var sawV4Import bool
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case apiV5 + "/login":
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+			_, _ = w.Write([]byte(`{"data":{"item":{"authenticated":true}}}`))
+		case apiV5 + "/jobs":
+			http.Error(w, `{"error":{"code":400,"message":"Bad Request"}}`, http.StatusBadRequest)
+		case apiV4 + "/jobs":
+			sawV4Import = true
+			if err := r.ParseMultipartForm(1024 * 1024); err != nil {
+				t.Fatal(err)
+			}
+			if got := r.FormValue("queue"); got != "hold" {
+				t.Fatalf("queue = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"data":{"item":{"id":"JOB-V4"}}}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	client, err := New(Config{ServerIP: srv.URL, SecretKey: "secret", Password: "password", InsecureTLS: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "sample.pdf")
+	if err := os.WriteFile(file, []byte("pdf"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.ImportJob(context.Background(), Session{Cookie: "session=abc"}, file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.JobID != "JOB-V4" || !sawV4Import {
+		t.Fatalf("fallback result=%#v sawV4Import=%v", result, sawV4Import)
+	}
+}
+
 func TestLoginAndImportJob(t *testing.T) {
 	var sawLogin bool
 	var sawImport bool
