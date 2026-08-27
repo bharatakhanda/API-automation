@@ -10,22 +10,22 @@ import (
 )
 
 var importantPropertyLabels = map[string]string{
-	"PageSize":         "Page size",
-	"EFPrintSize":      "Print size",
-	"EFMediaType":      "Media type",
-	"EFColorMode":      "Color mode",
-	"EFResolution":     "Resolution",
-	"EFPrintSpeed":     "Print speed",
-	"EFCopies":         "Copies",
-	"InputSlot":        "Input slot",
-	"EFOutputBin":      "Output bin",
-	"EFRotateDocument": "Rotation",
-	"EFBrightness":     "Brightness",
-	"EFTextGfxQual":    "Text/graphics quality",
-	"EFEdgeDropSize":   "Edge drop size",
-	"EFRaster":         "Raster mode",
+	"PageSize":            "Page size",
+	"EFPrintSize":         "Print size",
+	"EFMediaType":         "Media type",
+	"EFColorMode":         "Color mode",
+	"EFResolution":        "Resolution",
+	"EFPrintSpeed":        "Print speed",
+	"EFCopies":            "Copies",
+	"InputSlot":           "Input slot",
+	"EFOutputBin":         "Output bin",
+	"EFRotateDocument":    "Rotation",
+	"EFBrightness":        "Brightness",
+	"EFTextGfxQual":       "Text/graphics quality",
+	"EFEdgeDropSize":      "Edge drop size",
+	"EFRaster":            "Raster mode",
 	"EFFineLineRendering": "Fine line rendering",
-	"EFImageSmooth":    "Image smoothing",
+	"EFImageSmooth":       "Image smoothing",
 }
 
 func FromSnapshot(snapshot fiery.CapabilitySnapshot) Model {

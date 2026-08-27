@@ -28,33 +28,35 @@ import (
 )
 
 type MainWindow struct {
-	wnd           *ui.Main
-	serverIP      *ui.Edit
-	secretKey     *ui.Edit
-	password      *ui.Edit
-	folderPath    *ui.Edit
-	filePath      *ui.Edit
-	selectionMode *ui.ComboBox
-	url           *ui.Edit
-	method        *ui.Edit
-	queue         *ui.ComboBox
-	pageSize      *ui.ComboBox
-	resolution    *ui.ComboBox
-	colorMode     *ui.ComboBox
-	mediaType     *ui.ComboBox
-	printSpeed    *ui.ComboBox
-	runMode       *ui.ComboBox
-	strategy      *ui.ComboBox
-	maxCases      *ui.Edit
-	concurrency   *ui.Edit
-	runButton     *ui.Button
-	captureButton *ui.Button
-	cancelButton  *ui.Button
-	browseFolder  *ui.Button
-	browseFile    *ui.Button
-	results       *ui.ListView
-	log           *ui.Edit
-	status        *ui.Static
+	wnd               *ui.Main
+	serverIP          *ui.Edit
+	secretKey         *ui.Edit
+	password          *ui.Edit
+	folderPath        *ui.Edit
+	filePath          *ui.Edit
+	selectionMode     *ui.ComboBox
+	url               *ui.Edit
+	method            *ui.Edit
+	queue             *ui.ComboBox
+	pageSize          *ui.ComboBox
+	resolution        *ui.ComboBox
+	colorMode         *ui.ComboBox
+	mediaType         *ui.ComboBox
+	printSpeed        *ui.ComboBox
+	multiSelects      map[string][]*ui.CheckBox
+	multiSelectValues map[string][]string
+	runMode           *ui.ComboBox
+	strategy          *ui.ComboBox
+	maxCases          *ui.Edit
+	concurrency       *ui.Edit
+	runButton         *ui.Button
+	captureButton     *ui.Button
+	cancelButton      *ui.Button
+	browseFolder      *ui.Button
+	browseFile        *ui.Button
+	results           *ui.ListView
+	log               *ui.Edit
+	status            *ui.Static
 
 	capabilities capabilities.Model
 	cancel       context.CancelFunc
@@ -129,22 +131,48 @@ func Run() int {
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Print speed").Position(ui.Dpi(502, 546)).Size(ui.Dpi(90, 20)))
 	printSpeed := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(502, 570)).Width(ui.DpiX(150)).Texts("Capture first").Select(0))
 
-	status := ui.NewStatic(wnd, ui.OptsStatic().Text("Ready. Provide server IP, secret key, admin password, and a test file folder.").Position(ui.Dpi(220, 626)).Size(ui.Dpi(940, 22)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Multi-select values for permutation strategies").Position(ui.Dpi(220, 620)).Size(ui.Dpi(320, 18)))
+	multiSelects := buildMultiSelectControls(wnd)
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("05  EXECUTION RESULTS").Position(ui.Dpi(220, 664)).Size(ui.Dpi(200, 18)))
+	status := ui.NewStatic(wnd, ui.OptsStatic().Text("Ready. Provide server IP, secret key, admin password, and a test file folder.").Position(ui.Dpi(220, 768)).Size(ui.Dpi(940, 22)))
+
+	ui.NewStatic(wnd, ui.OptsStatic().Text("05  EXECUTION RESULTS").Position(ui.Dpi(220, 806)).Size(ui.Dpi(200, 18)))
 	results := ui.NewListView(wnd, ui.OptsListView().
-		Position(ui.Dpi(220, 690)).Size(ui.Dpi(940, 184)).
+		Position(ui.Dpi(220, 832)).Size(ui.Dpi(940, 184)).
 		CtrlExStyle(co.LVS_EX_FULLROWSELECT|co.LVS_EX_GRIDLINES).
 		Column("Request", ui.DpiX(190)).Column("Method", ui.DpiX(90)).Column("Status", ui.DpiX(90)).Column("Duration", ui.DpiX(120)).Column("URL", ui.DpiX(420)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("06  ACTIVITY LOG").Position(ui.Dpi(220, 892)).Size(ui.Dpi(180, 18)))
-	log := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 918)).Width(ui.DpiX(940)).Height(ui.DpiY(48)).
+	ui.NewStatic(wnd, ui.OptsStatic().Text("06  ACTIVITY LOG").Position(ui.Dpi(220, 1034)).Size(ui.Dpi(180, 18)))
+	log := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 1060)).Width(ui.DpiX(940)).Height(ui.DpiY(48)).
 		CtrlStyle(co.ES_MULTILINE|co.ES_AUTOVSCROLL|co.ES_READONLY|co.ES_WANTRETURN).
 		WndStyle(co.WS_CHILD|co.WS_VISIBLE|co.WS_VSCROLL|co.WS_TABSTOP))
 
-	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, queue: queue, pageSize: pageSize, resolution: resolution, colorMode: colorMode, mediaType: mediaType, printSpeed: printSpeed, runMode: runMode, strategy: strategy, maxCases: maxCases, concurrency: concurrency, runButton: runButton, captureButton: captureButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status}
+	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, queue: queue, pageSize: pageSize, resolution: resolution, colorMode: colorMode, mediaType: mediaType, printSpeed: printSpeed, multiSelects: multiSelects, multiSelectValues: map[string][]string{}, runMode: runMode, strategy: strategy, maxCases: maxCases, concurrency: concurrency, runButton: runButton, captureButton: captureButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status}
 	mw.events()
 	return wnd.RunAsMain()
+}
+
+func buildMultiSelectControls(wnd *ui.Main) map[string][]*ui.CheckBox {
+	defs := []struct {
+		id    string
+		label string
+		x, y  int
+	}{
+		{id: "PageSize", label: "Page size", x: 220, y: 646},
+		{id: "EFResolution", label: "Resolution", x: 410, y: 646},
+		{id: "EFColorMode", label: "Color mode", x: 600, y: 646},
+		{id: "EFMediaType", label: "Media type", x: 790, y: 646},
+		{id: "EFPrintSpeed", label: "Print speed", x: 980, y: 646},
+	}
+	controls := make(map[string][]*ui.CheckBox, len(defs))
+	for _, def := range defs {
+		ui.NewStatic(wnd, ui.OptsStatic().Text(def.label).Position(ui.Dpi(def.x, def.y)).Size(ui.Dpi(150, 18)))
+		for i := 0; i < 4; i++ {
+			chk := ui.NewCheckBox(wnd, ui.OptsCheckBox().Text("-").Position(ui.Dpi(def.x, def.y+24+(i*22))).Size(ui.Dpi(178, 20)))
+			controls[def.id] = append(controls[def.id], chk)
+		}
+	}
+	return controls
 }
 
 func (m *MainWindow) events() {
@@ -323,6 +351,11 @@ func (m *MainWindow) populateCapabilities(model capabilities.Model) {
 	m.replaceOptionItems(m.colorMode, model, "EFColorMode")
 	m.replaceOptionItems(m.mediaType, model, "EFMediaType")
 	m.replaceOptionItems(m.printSpeed, model, "EFPrintSpeed")
+	m.populateMultiSelect("PageSize", model)
+	m.populateMultiSelect("EFResolution", model)
+	m.populateMultiSelect("EFColorMode", model)
+	m.populateMultiSelect("EFMediaType", model)
+	m.populateMultiSelect("EFPrintSpeed", model)
 	m.appendLog("Server: %s serial=%s version=%s", fallback(model.ServerName, "unknown"), fallback(model.SerialNumber, "unknown"), fallback(model.Version, "unknown"))
 	m.appendLog("Loaded capabilities: queues=%d pageSizes=%d resolutions=%d colorModes=%d mediaTypes=%d printSpeeds=%d",
 		len(queues), optionValueCount(model, "PageSize"), optionValueCount(model, "EFResolution"), optionValueCount(model, "EFColorMode"), optionValueCount(model, "EFMediaType"), optionValueCount(model, "EFPrintSpeed"))
@@ -335,6 +368,33 @@ func (m *MainWindow) replaceOptionItems(combo *ui.ComboBox, model capabilities.M
 		return
 	}
 	m.replaceComboItems(combo, option.Values, "No values reported")
+}
+
+func (m *MainWindow) populateMultiSelect(optionID string, model capabilities.Model) {
+	boxes := m.multiSelects[optionID]
+	option, ok := model.OptionByID(optionID)
+	m.multiSelectValues[optionID] = nil
+	if !ok || len(option.Values) == 0 {
+		for _, box := range boxes {
+			box.Hwnd().SetWindowText("-")
+			box.SetCheck(false)
+		}
+		return
+	}
+	values := option.Values
+	if len(values) > len(boxes) {
+		values = values[:len(boxes)]
+	}
+	m.multiSelectValues[optionID] = append([]string(nil), values...)
+	for i, box := range boxes {
+		if i >= len(values) {
+			box.Hwnd().SetWindowText("-")
+			box.SetCheck(false)
+			continue
+		}
+		box.Hwnd().SetWindowText(shortLabel(values[i], 22))
+		box.SetCheck(i == 0)
+	}
 }
 
 func (m *MainWindow) expandComboDropDowns() {
@@ -391,21 +451,25 @@ func (m *MainWindow) selectedCombinations(strategy combinations.Strategy, limit 
 		return []combinations.Combination{combo}
 	}
 	axes := []combinations.Axis{
-		m.optionAxis("PageSize"),
-		m.optionAxis("EFResolution"),
-		m.optionAxis("EFColorMode"),
-		m.optionAxis("EFMediaType"),
-		m.optionAxis("EFPrintSpeed"),
+		m.multiSelectAxis("PageSize"),
+		m.multiSelectAxis("EFResolution"),
+		m.multiSelectAxis("EFColorMode"),
+		m.multiSelectAxis("EFMediaType"),
+		m.multiSelectAxis("EFPrintSpeed"),
 	}
 	return combinations.GenerateWithStrategy(axes, strategy, limit)
 }
 
-func (m *MainWindow) optionAxis(optionID string) combinations.Axis {
-	option, ok := m.capabilities.OptionByID(optionID)
-	if !ok {
-		return combinations.Axis{}
+func (m *MainWindow) multiSelectAxis(optionID string) combinations.Axis {
+	boxes := m.multiSelects[optionID]
+	values := m.multiSelectValues[optionID]
+	selected := make([]string, 0, len(values))
+	for i, value := range values {
+		if i < len(boxes) && boxes[i].IsChecked() {
+			selected = append(selected, value)
+		}
 	}
-	return combinations.Axis{Name: optionID, Values: option.Values}
+	return combinations.Axis{Name: optionID, Values: selected}
 }
 
 func (m *MainWindow) selectedStrategy() combinations.Strategy {
@@ -453,6 +517,16 @@ func availableQueueNames(queues []capabilities.Queue) []string {
 		}
 	}
 	return names
+}
+
+func shortLabel(value string, max int) string {
+	if len(value) <= max {
+		return value
+	}
+	if max <= 1 {
+		return value[:max]
+	}
+	return value[:max-1] + "…"
 }
 
 func optionValueCount(model capabilities.Model, optionID string) int {

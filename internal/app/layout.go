@@ -2,7 +2,7 @@ package app
 
 const (
 	windowWidth  = 1280
-	windowHeight = 980
+	windowHeight = 1120
 )
 
 type uiRect struct {
@@ -34,8 +34,8 @@ func enterpriseLayoutRects() []uiRect {
 		{Name: "colorMode", X: 816, Y: 502, W: 150, H: 26, Layer: "input"},
 		{Name: "mediaType", X: 220, Y: 570, W: 260, H: 26, Layer: "input"},
 		{Name: "printSpeed", X: 502, Y: 570, W: 150, H: 26, Layer: "input"},
-		{Name: "status", X: 220, Y: 626, W: 940, H: 22, Layer: "status"},
-		{Name: "results", X: 220, Y: 690, W: 940, H: 184, Layer: "surface"},
-		{Name: "log", X: 220, Y: 918, W: 940, H: 48, Layer: "surface"},
+		{Name: "status", X: 220, Y: 768, W: 940, H: 22, Layer: "status"},
+		{Name: "results", X: 220, Y: 832, W: 940, H: 184, Layer: "surface"},
+		{Name: "log", X: 220, Y: 1060, W: 940, H: 48, Layer: "surface"},
 	}
 }
