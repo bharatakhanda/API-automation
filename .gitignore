@@ -2,6 +2,7 @@ bin/
 dist/
 DATA/
 server-capabilities-snapshot-*.json
+EnvironmentSnapshot-*.json
 captures/
 *.exe
 *.test

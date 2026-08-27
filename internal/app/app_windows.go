@@ -19,6 +19,7 @@ import (
 	"api-automation/internal/fiery"
 	"api-automation/internal/files"
 	"api-automation/internal/model"
+	"api-automation/internal/preflight"
 
 	"github.com/rodrigocfd/windigo/co"
 	"github.com/rodrigocfd/windigo/ui"
@@ -264,18 +265,28 @@ func (m *MainWindow) runCapabilityCapture(ctx context.Context, server model.Serv
 		})
 		return
 	}
-	snapshot := client.DiscoverV5(ctx, session)
+	snapshot := client.DiscoverCapabilities(ctx, session)
+	capabilityModel := capabilities.FromSnapshot(snapshot)
+	environmentSnapshot := preflight.Run(snapshot, capabilityModel)
 	path, err := client.SaveCapabilitySnapshot(snapshot, captureDirectory())
+	envPath, envErr := preflight.Save(environmentSnapshot, captureDirectory())
 	m.wnd.UiThread(func() {
 		if err != nil {
 			m.setStatus("Capability capture failed.")
 			m.appendLog("Capture failed: %s", err)
 			return
 		}
-		m.populateCapabilities(capabilities.FromSnapshot(snapshot))
-		m.setStatus("Capability capture saved and UI populated from server response.")
-		m.appendLog("Captured %d v5 endpoint response(s)", len(snapshot.Endpoints))
-		m.appendLog("Saved snapshot: %s", path)
+		if envErr != nil {
+			m.appendLog("Environment snapshot failed: %s", envErr)
+		}
+		m.populateCapabilities(capabilityModel)
+		m.setStatus("Capability capture saved and UI populated from server response. Preflight: " + environmentSnapshot.OverallStatus)
+		m.appendLog("Captured %d v4/v5 endpoint response(s)", len(snapshot.Endpoints))
+		m.appendLog("Preflight checks: passed=%d failed=%d status=%s", environmentSnapshot.Summary.PassedChecks, environmentSnapshot.Summary.FailedChecks, environmentSnapshot.OverallStatus)
+		m.appendLog("Saved capability snapshot: %s", path)
+		if envPath != "" {
+			m.appendLog("Saved environment snapshot: %s", envPath)
+		}
 	})
 }
 
