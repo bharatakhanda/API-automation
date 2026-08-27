@@ -136,6 +136,10 @@ func Run() int {
 }
 
 func (m *MainWindow) events() {
+	m.wnd.On().WmCreate(func(_ ui.WmCreate) int {
+		m.expandComboDropDowns()
+		return 0
+	})
 	m.runButton.On().BnClicked(func() { m.startRun() })
 	m.captureButton.On().BnClicked(func() { m.captureCapabilities() })
 	m.cancelButton.On().BnClicked(func() { m.cancelRun() })
@@ -284,13 +288,16 @@ func captureDirectory() string {
 }
 
 func (m *MainWindow) populateCapabilities(model capabilities.Model) {
-	m.replaceComboItems(m.queue, availableQueueNames(model.Queues), "No available queues")
+	queues := availableQueueNames(model.Queues)
+	m.replaceComboItems(m.queue, queues, "No available queues")
 	m.replaceOptionItems(m.pageSize, model, "PageSize")
 	m.replaceOptionItems(m.resolution, model, "EFResolution")
 	m.replaceOptionItems(m.colorMode, model, "EFColorMode")
 	m.replaceOptionItems(m.mediaType, model, "EFMediaType")
 	m.replaceOptionItems(m.printSpeed, model, "EFPrintSpeed")
 	m.appendLog("Server: %s serial=%s version=%s", fallback(model.ServerName, "unknown"), fallback(model.SerialNumber, "unknown"), fallback(model.Version, "unknown"))
+	m.appendLog("Loaded capabilities: queues=%d pageSizes=%d resolutions=%d colorModes=%d mediaTypes=%d printSpeeds=%d",
+		len(queues), optionValueCount(model, "PageSize"), optionValueCount(model, "EFResolution"), optionValueCount(model, "EFColorMode"), optionValueCount(model, "EFMediaType"), optionValueCount(model, "EFPrintSpeed"))
 }
 
 func (m *MainWindow) replaceOptionItems(combo *ui.ComboBox, model capabilities.Model, optionID string) {
@@ -300,6 +307,25 @@ func (m *MainWindow) replaceOptionItems(combo *ui.ComboBox, model capabilities.M
 		return
 	}
 	m.replaceComboItems(combo, option.Values, "No values reported")
+}
+
+func (m *MainWindow) expandComboDropDowns() {
+	m.setComboDropDownHeight(m.selectionMode, 150)
+	m.setComboDropDownHeight(m.queue, 190)
+	m.setComboDropDownHeight(m.pageSize, 190)
+	m.setComboDropDownHeight(m.resolution, 150)
+	m.setComboDropDownHeight(m.colorMode, 150)
+	m.setComboDropDownHeight(m.mediaType, 260)
+	m.setComboDropDownHeight(m.printSpeed, 150)
+}
+
+func (m *MainWindow) setComboDropDownHeight(combo *ui.ComboBox, width int) {
+	_ = combo.Hwnd().SetWindowPos(
+		win.HWND(0),
+		win.POINT{},
+		win.SIZE{Cx: int32(ui.DpiX(width)), Cy: int32(ui.DpiY(220))},
+		co.SWP_NOMOVE|co.SWP_NOZORDER|co.SWP_NOACTIVATE,
+	)
 }
 
 func (m *MainWindow) replaceComboItems(combo *ui.ComboBox, items []string, emptyText string) {
@@ -321,6 +347,14 @@ func availableQueueNames(queues []capabilities.Queue) []string {
 		}
 	}
 	return names
+}
+
+func optionValueCount(model capabilities.Model, optionID string) int {
+	option, ok := model.OptionByID(optionID)
+	if !ok {
+		return 0
+	}
+	return len(option.Values)
 }
 
 func fallback(value, fallback string) string {
