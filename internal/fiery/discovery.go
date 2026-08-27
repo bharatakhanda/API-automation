@@ -13,16 +13,26 @@ import (
 )
 
 var V5DiscoveryEndpoints = []DiscoveryEndpoint{
-	{Name: "info", Method: http.MethodGet, Path: apiV5 + "/info"},
-	{Name: "properties", Method: http.MethodGet, Path: apiV5 + "/properties"},
-	{Name: "jobs", Method: http.MethodGet, Path: apiV5 + "/jobs"},
-	{Name: "queues", Method: http.MethodGet, Path: apiV5 + "/queues"},
-	{Name: "printers", Method: http.MethodGet, Path: apiV5 + "/printers"},
-	{Name: "device", Method: http.MethodGet, Path: apiV5 + "/device"},
-	{Name: "server", Method: http.MethodGet, Path: apiV5 + "/server"},
-	{Name: "system", Method: http.MethodGet, Path: apiV5 + "/system"},
-	{Name: "status", Method: http.MethodGet, Path: apiV5 + "/status"},
+	{Name: "v5_info", Method: http.MethodGet, Path: apiV5 + "/info"},
+	{Name: "v5_properties", Method: http.MethodGet, Path: apiV5 + "/properties"},
+	{Name: "v5_jobs", Method: http.MethodGet, Path: apiV5 + "/jobs"},
+	{Name: "v5_queues", Method: http.MethodGet, Path: apiV5 + "/queues"},
+	{Name: "v5_printers", Method: http.MethodGet, Path: apiV5 + "/printers"},
+	{Name: "v5_device", Method: http.MethodGet, Path: apiV5 + "/device"},
+	{Name: "v5_server", Method: http.MethodGet, Path: apiV5 + "/server"},
+	{Name: "v5_system", Method: http.MethodGet, Path: apiV5 + "/system"},
+	{Name: "v5_status", Method: http.MethodGet, Path: apiV5 + "/status"},
 }
+
+var V4DiscoveryEndpoints = []DiscoveryEndpoint{
+	{Name: "v4_info", Method: http.MethodGet, Path: apiV4 + "/info"},
+	{Name: "v4_status", Method: http.MethodGet, Path: apiV4 + "/status"},
+	{Name: "v4_features", Method: http.MethodGet, Path: apiV4 + "/features"},
+	{Name: "v4_properties", Method: http.MethodGet, Path: apiV4 + "/properties"},
+	{Name: "v4_papercatalog", Method: http.MethodGet, Path: apiV4 + "/papercatalog"},
+}
+
+var CapabilityDiscoveryEndpoints = append(append([]DiscoveryEndpoint{}, V5DiscoveryEndpoints...), V4DiscoveryEndpoints...)
 
 type DiscoveryEndpoint struct {
 	Name   string `json:"name"`
@@ -49,13 +59,21 @@ type EndpointSnapshot struct {
 }
 
 func (c *Client) DiscoverV5(ctx context.Context, session Session) CapabilitySnapshot {
+	return c.discover(ctx, session, "v5", V5DiscoveryEndpoints)
+}
+
+func (c *Client) DiscoverCapabilities(ctx context.Context, session Session) CapabilitySnapshot {
+	return c.discover(ctx, session, "v5+v4", CapabilityDiscoveryEndpoints)
+}
+
+func (c *Client) discover(ctx context.Context, session Session, apiVersion string, endpoints []DiscoveryEndpoint) CapabilitySnapshot {
 	snapshot := CapabilitySnapshot{
 		CapturedAt: time.Now().UTC(),
 		Server:     c.baseURL,
-		APIVersion: "v5",
-		Endpoints:  make([]EndpointSnapshot, 0, len(V5DiscoveryEndpoints)),
+		APIVersion: apiVersion,
+		Endpoints:  make([]EndpointSnapshot, 0, len(endpoints)),
 	}
-	for _, endpoint := range V5DiscoveryEndpoints {
+	for _, endpoint := range endpoints {
 		snapshot.Endpoints = append(snapshot.Endpoints, c.discoverEndpoint(ctx, session, endpoint))
 	}
 	return snapshot

@@ -20,6 +20,7 @@ import (
 const (
 	DefaultUsername = "admin"
 	apiV5           = "/live/api/v5"
+	apiV4           = "/live/api/v4"
 )
 
 // DefaultSecretKey is intentionally empty in source. For temporary field testing,
@@ -104,6 +105,18 @@ func New(cfg Config) (*Client, error) {
 }
 
 func (c *Client) Login(ctx context.Context) (Session, error) {
+	session, err := c.login(ctx, apiV5)
+	if err == nil {
+		return session, nil
+	}
+	fallbackSession, fallbackErr := c.login(ctx, apiV4)
+	if fallbackErr == nil {
+		return fallbackSession, nil
+	}
+	return Session{}, fmt.Errorf("v5 login failed: %w; v4 login failed: %w", err, fallbackErr)
+}
+
+func (c *Client) login(ctx context.Context, apiPath string) (Session, error) {
 	payload := map[string]string{
 		"username":     c.cfg.Username,
 		"password":     c.cfg.Password,
@@ -114,7 +127,7 @@ func (c *Client) Login(ctx context.Context) (Session, error) {
 		return Session{}, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+apiV5+"/login", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+apiPath+"/login", bytes.NewReader(body))
 	if err != nil {
 		return Session{}, err
 	}
