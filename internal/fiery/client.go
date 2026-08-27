@@ -169,6 +169,10 @@ func (c *Client) KeepAlive(ctx context.Context, session Session) error {
 }
 
 func (c *Client) ImportJob(ctx context.Context, session Session, filePath string) (ImportResult, error) {
+	return c.ImportJobToQueue(ctx, session, filePath, "hold")
+}
+
+func (c *Client) ImportJobToQueue(ctx context.Context, session Session, filePath, queue string) (ImportResult, error) {
 	started := time.Now()
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -185,7 +189,11 @@ func (c *Client) ImportJob(ctx context.Context, session Session, filePath string
 	if _, err := io.Copy(part, file); err != nil {
 		return ImportResult{FilePath: filePath, Duration: time.Since(started)}, err
 	}
-	if err := writer.WriteField("queue", "hold"); err != nil {
+	queue = strings.TrimSpace(queue)
+	if queue == "" {
+		queue = "hold"
+	}
+	if err := writer.WriteField("queue", queue); err != nil {
 		return ImportResult{FilePath: filePath, Duration: time.Since(started)}, err
 	}
 	if err := writer.Close(); err != nil {
@@ -271,12 +279,21 @@ func (c *Client) UpdateJobAttributes(ctx context.Context, session Session, jobID
 }
 
 func (c *Client) JobAction(ctx context.Context, session Session, jobID, action string) error {
+	if err := c.jobAction(ctx, session, apiV5, jobID, action); err == nil {
+		return nil
+	} else if fallbackErr := c.jobAction(ctx, session, apiV4, jobID, action); fallbackErr != nil {
+		return fmt.Errorf("v5 job action failed: %w; v4 job action failed: %w", err, fallbackErr)
+	}
+	return nil
+}
+
+func (c *Client) jobAction(ctx context.Context, session Session, apiPath, jobID, action string) error {
 	jobID = strings.TrimSpace(jobID)
 	action = strings.Trim(strings.TrimSpace(action), "/")
 	if jobID == "" || action == "" {
 		return errors.New("job ID and action are required")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+apiV5+"/jobs/"+url.PathEscape(jobID)+"/"+action, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+apiPath+"/jobs/"+url.PathEscape(jobID)+"/"+action, nil)
 	if err != nil {
 		return err
 	}
