@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"api-automation/internal/capabilities"
+	"api-automation/internal/combinations"
 	"api-automation/internal/fiery"
 	"api-automation/internal/files"
 	"api-automation/internal/model"
@@ -201,11 +202,14 @@ func (m *MainWindow) startRun() {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.running.Store(true)
+	attributes := m.selectedJobAttributes()
+	combos := combinations.Generate([]combinations.Axis{attributesToAxis(attributes)}, 1)
 	m.results.DeleteAllItems()
 	m.setStatus("Connecting to Fiery server " + server.IPAddress + "...")
-	m.appendLog("Starting server automation with %d worker(s), %d selected test file(s)", workers, len(selectedFiles))
+	m.appendLog("Starting server automation with %d worker(s), %d selected test file(s), %d selected job attribute(s)", workers, len(selectedFiles), len(attributes))
+	m.appendLog("Generated %d executable test combination(s) from current UI selections", len(combos))
 
-	go m.runFieryAutomation(ctx, server, selectedFiles, workers)
+	go m.runFieryAutomation(ctx, server, selectedFiles, workers, attributes)
 }
 
 func (m *MainWindow) serverConnection() (model.ServerConnection, bool) {
@@ -350,6 +354,32 @@ func (m *MainWindow) replaceComboItems(combo *ui.ComboBox, items []string, empty
 	combo.SelectIndex(0)
 }
 
+func (m *MainWindow) selectedJobAttributes() map[string]string {
+	attributes := map[string]string{}
+	addSelectedAttribute(attributes, "PageSize", m.pageSize)
+	addSelectedAttribute(attributes, "EFResolution", m.resolution)
+	addSelectedAttribute(attributes, "EFColorMode", m.colorMode)
+	addSelectedAttribute(attributes, "EFMediaType", m.mediaType)
+	addSelectedAttribute(attributes, "EFPrintSpeed", m.printSpeed)
+	return attributes
+}
+
+func addSelectedAttribute(attributes map[string]string, name string, combo *ui.ComboBox) {
+	value := strings.TrimSpace(combo.CurrentText())
+	if value == "" || strings.Contains(value, "Capture") || strings.Contains(value, "Not reported") || strings.Contains(value, "No values") {
+		return
+	}
+	attributes[name] = value
+}
+
+func attributesToAxis(attributes map[string]string) combinations.Axis {
+	values := make([]string, 0, len(attributes))
+	for key, value := range attributes {
+		values = append(values, key+"="+value)
+	}
+	return combinations.Axis{Name: "SelectedAttributes", Values: values}
+}
+
 func availableQueueNames(queues []capabilities.Queue) []string {
 	names := make([]string, 0, len(queues))
 	for _, queue := range queues {
@@ -375,7 +405,7 @@ func fallback(value, fallback string) string {
 	return value
 }
 
-func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int) {
+func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, attributes map[string]string) {
 	defer func() {
 		m.wnd.UiThread(func() { m.running.Store(false) })
 	}()
@@ -415,6 +445,9 @@ func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.Server
 			defer wg.Done()
 			for file := range jobs {
 				result, err := client.ImportJob(ctx, session, file)
+				if err == nil && result.JobID != "" {
+					err = client.UpdateJobAttributes(ctx, session, result.JobID, attributes)
+				}
 				res := importResultToModel(result, err)
 				select {
 				case results <- res:
