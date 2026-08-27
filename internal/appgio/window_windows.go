@@ -280,47 +280,84 @@ func (w *Window) strategySelector(gtx layout.Context) layout.Dimensions {
 }
 
 func (w *Window) optionGrid(gtx layout.Context, model capabilities.Model) layout.Dimensions {
-	ids := []string{"PageSize", "EFResolution", "EFColorMode", "EFMediaType", "EFPrintSpeed"}
-	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.queueColumn(gtx, model) }), layout.Rigid(spacerX(12)), layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-		children := make([]layout.FlexChild, 0, len(ids)*2)
-		for _, id := range ids {
-			opt, ok := model.OptionByID(id)
-			if !ok {
-				continue
-			}
-			children = append(children, layout.Rigid(w.optionColumn(opt)), layout.Rigid(spacerX(12)))
-		}
-		return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
-	}))
-}
-func (w *Window) queueColumn(gtx layout.Context, model capabilities.Model) layout.Dimensions {
-	items := []layout.FlexChild{layout.Rigid(label(w.theme, "Queue", 14, palette.muted).Layout)}
-	for _, q := range model.Queues {
-		if q.Available {
-			items = append(items, layout.Rigid(label(w.theme, q.Name, 13, palette.text).Layout))
-		}
+	groups := capabilities.GroupedOptions(model)
+	children := []layout.FlexChild{layout.Rigid(w.queueGroup(model))}
+	for _, group := range groups {
+		g := group
+		children = append(children, layout.Rigid(spacer(14)), layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.capabilityGroup(gtx, g) }))
 	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, items...)
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
-func (w *Window) optionColumn(opt capabilities.Option) layout.Widget {
+
+func (w *Window) queueGroup(model capabilities.Model) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		ensureBools(w.selected, opt.ID, optionValues(opt))
-		items := []layout.FlexChild{layout.Rigid(label(w.theme, opt.Label, 14, palette.muted).Layout)}
-		vals := optionValues(opt)
-		if len(vals) > 5 {
-			vals = vals[:5]
+		items := []layout.FlexChild{layout.Rigid(label(w.theme, "Queues", 16, palette.text).Layout)}
+		available := 0
+		for _, q := range model.Queues {
+			state := "unavailable"
+			if q.Available {
+				state = "available"
+				available++
+			}
+			queueText := fmt.Sprintf("%s · %s", q.Name, state)
+			items = append(items, layout.Rigid(label(w.theme, queueText, 13, palette.text).Layout))
 		}
-		for _, v := range vals {
-			val := v
-			cb := w.selected[opt.ID][val]
-			items = append(items, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				c := material.CheckBox(w.theme, cb, short(val, 24))
-				c.Color = palette.primary
-				return c.Layout(gtx)
-			}))
+		if len(model.Queues) == 0 {
+			items = append(items, layout.Rigid(label(w.theme, "No queue data returned by server", 13, palette.muted).Layout))
+		} else {
+			items = append(items, layout.Rigid(label(w.theme, fmt.Sprintf("Available queues: %d of %d", available, len(model.Queues)), 13, palette.muted).Layout))
 		}
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, items...)
+		return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, items...)
+		})
 	}
+}
+
+func (w *Window) capabilityGroup(gtx layout.Context, group capabilities.OptionGroup) layout.Dimensions {
+	children := []layout.FlexChild{layout.Rigid(label(w.theme, group.Name, 16, palette.text).Layout), layout.Rigid(spacer(8))}
+	for _, opt := range group.Options {
+		option := opt
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionRow(gtx, option) }), layout.Rigid(spacer(8)))
+	}
+	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	})
+}
+
+func (w *Window) optionRow(gtx layout.Context, opt capabilities.Option) layout.Dimensions {
+	ensureBools(w.selected, opt.ID, optionValues(opt))
+	vals := optionValues(opt)
+	shown := vals
+	if len(shown) > 12 {
+		shown = shown[:12]
+	}
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X, gtx.Constraints.Max.X = gtx.Dp(unit.Dp(220)), gtx.Dp(unit.Dp(220))
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(label(w.theme, opt.Label, 14, palette.text).Layout),
+				layout.Rigid(label(w.theme, opt.ID, 12, palette.muted).Layout),
+				layout.Rigid(label(w.theme, fmt.Sprintf("%d value(s)", len(vals)), 12, palette.muted).Layout),
+			)
+		}),
+		layout.Rigid(spacerX(12)),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			items := make([]layout.FlexChild, 0, len(shown)+1)
+			for _, v := range shown {
+				val := v
+				cb := w.selected[opt.ID][val]
+				items = append(items, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					c := material.CheckBox(w.theme, cb, val)
+					c.Color = palette.primary
+					return c.Layout(gtx)
+				}))
+			}
+			if len(vals) > len(shown) {
+				items = append(items, layout.Rigid(label(w.theme, fmt.Sprintf("+%d more values captured in snapshot/logs", len(vals)-len(shown)), 13, palette.muted).Layout))
+			}
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, items...)
+		}),
+	)
 }
 
 func (w *Window) resultsCard(gtx layout.Context) layout.Dimensions {
@@ -396,8 +433,21 @@ func (w *Window) captureCapabilities() {
 		w.capabilities = model
 		w.mu.Unlock()
 		w.setStatus("Capabilities loaded. Preflight: " + env.OverallStatus)
+		w.logCapabilitySummary(model)
 		w.addLog("Saved capability snapshot: %s", path)
 	}()
+}
+
+func (w *Window) logCapabilitySummary(model capabilities.Model) {
+	groups := capabilities.GroupedOptions(model)
+	w.addLog("Discovered server %s serial=%s version=%s queues=%d options=%d groups=%d", fallback(model.ServerName, "unknown"), fallback(model.SerialNumber, "unknown"), fallback(model.Version, "unknown"), len(model.Queues), len(model.Options), len(groups))
+	for _, group := range groups {
+		keys := make([]string, 0, len(group.Options))
+		for _, opt := range group.Options {
+			keys = append(keys, fmt.Sprintf("%s(%d)", opt.ID, len(optionValues(opt))))
+		}
+		w.addLog("Capability group %s: %s", group.Name, strings.Join(keys, ", "))
+	}
 }
 
 func (w *Window) startRun() {
@@ -418,6 +468,7 @@ func (w *Window) startRun() {
 		workers = 1
 	}
 	combos := w.selectedCombinations()
+	w.addLog("Selected %d combination(s) for strategy=%s", len(combos), w.strategy)
 	mode := runModes[w.runModeIndex]
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
@@ -576,6 +627,9 @@ func (w *Window) selectedCombinations() []combinations.Combination {
 			axes = append(axes, combinations.Axis{Name: id, Values: vals})
 		}
 	}
+	if len(axes) == 0 {
+		return []combinations.Combination{{}}
+	}
 	limit, _ := strconv.Atoi(strings.TrimSpace(w.maxCases.Text()))
 	if limit < 1 {
 		limit = 100
@@ -611,9 +665,9 @@ func ensureBools(store map[string]map[string]*widget.Bool, id string, vals []str
 	if store[id] == nil {
 		store[id] = map[string]*widget.Bool{}
 	}
-	for i, v := range vals {
+	for _, v := range vals {
 		if store[id][v] == nil {
-			store[id][v] = &widget.Bool{Value: i == 0}
+			store[id][v] = &widget.Bool{}
 		}
 	}
 }
