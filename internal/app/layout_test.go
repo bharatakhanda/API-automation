@@ -16,6 +16,25 @@ func TestEnterpriseLayoutDoesNotOverlapActionableControls(t *testing.T) {
 	}
 }
 
+func TestSettingsLayoutDoesNotOverlapItself(t *testing.T) {
+	rects := settingsLayoutRects()
+	for i := range rects {
+		for j := i + 1; j < len(rects); j++ {
+			if overlaps(rects[i], rects[j]) {
+				t.Fatalf("%s overlaps %s: %#v %#v", rects[i].Name, rects[j].Name, rects[i], rects[j])
+			}
+		}
+	}
+}
+
+func TestSettingsLayoutFitsInsideWindow(t *testing.T) {
+	for _, r := range settingsLayoutRects() {
+		if r.X < 0 || r.Y < 0 || r.X+r.W > windowWidth || r.Y+r.H > windowHeight {
+			t.Fatalf("%s is outside %dx%d window: %#v", r.Name, windowWidth, windowHeight, r)
+		}
+	}
+}
+
 func TestEnterpriseLayoutFitsInsideWindow(t *testing.T) {
 	for _, r := range enterpriseLayoutRects() {
 		if r.X < 0 || r.Y < 0 || r.X+r.W > windowWidth || r.Y+r.H > windowHeight {

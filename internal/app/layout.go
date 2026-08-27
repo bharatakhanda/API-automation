@@ -11,6 +11,18 @@ type uiRect struct {
 	Layer      string
 }
 
+func settingsLayoutRects() []uiRect {
+	return []uiRect{
+		{Name: "settingsTitle", X: 220, Y: 80, W: 320, H: 18, Layer: "settings"},
+		{Name: "serverIPLabel", X: 220, Y: 100, W: 140, H: 20, Layer: "settings"},
+		{Name: "serverIP", X: 220, Y: 124, W: 220, H: 26, Layer: "settings"},
+		{Name: "secretLabel", X: 456, Y: 100, W: 120, H: 20, Layer: "settings"},
+		{Name: "secretKey", X: 456, Y: 124, W: 310, H: 26, Layer: "settings"},
+		{Name: "passwordLabel", X: 782, Y: 100, W: 130, H: 20, Layer: "settings"},
+		{Name: "password", X: 782, Y: 124, W: 160, H: 26, Layer: "settings"},
+	}
+}
+
 func enterpriseLayoutRects() []uiRect {
 	return []uiRect{
 		{Name: "settingsButton", X: 620, Y: 24, W: 110, H: 30, Layer: "action"},

@@ -10,8 +10,12 @@ type textFitSpec struct {
 }
 
 func TestImportantUITextFitsWithoutLikelyTruncation(t *testing.T) {
-	rects := rectMap(enterpriseLayoutRects())
+	rects := rectMap(append(enterpriseLayoutRects(), settingsLayoutRects()...))
 	specs := []textFitSpec{
+		{Name: "settingsTitle", Text: "SETTINGS  SERVER CONNECTION", Width: rects["settingsTitle"].W, Padding: 8},
+		{Name: "serverIPLabel", Text: "Server IP address", Width: rects["serverIPLabel"].W, Padding: 8},
+		{Name: "secretLabel", Text: "Secret key", Width: rects["secretLabel"].W, Padding: 8},
+		{Name: "passwordLabel", Text: "Admin password", Width: rects["passwordLabel"].W, Padding: 8},
 		{Name: "settingsButton", Text: "Settings", Width: rects["settingsButton"].W, Padding: 28},
 		{Name: "captureButton", Text: "Get server capabilities", Width: rects["captureButton"].W, Padding: 32},
 		{Name: "runButton", Text: "Run automation", Width: rects["runButton"].W, Padding: 28},

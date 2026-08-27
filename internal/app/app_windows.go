@@ -64,6 +64,7 @@ type MainWindow struct {
 	status            *ui.Static
 	progress          *ui.ProgressBar
 	settingsCtrls     []hwndControl
+	workspaceCtrls    []hwndControl
 	capabilityCtrls   []hwndControl
 	settingsVisible   bool
 	theme             appTheme
@@ -113,26 +114,30 @@ func Run() int {
 	password := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(782, 124)).Width(ui.DpiX(160)).Height(ui.DpiY(26)).CtrlStyle(co.ES_PASSWORD|co.ES_AUTOHSCROLL|co.ES_NOHIDESEL))
 	settingsCtrls = append(settingsCtrls, password)
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("01  TEST ASSETS").Position(ui.Dpi(220, 82)).Size(ui.Dpi(180, 18)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Folder").Position(ui.Dpi(220, 102)).Size(ui.Dpi(90, 20)))
+	var workspaceCtrls []hwndControl
+	testAssetsTitle := ui.NewStatic(wnd, ui.OptsStatic().Text("01  TEST ASSETS").Position(ui.Dpi(220, 82)).Size(ui.Dpi(180, 18)))
+	folderLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Folder").Position(ui.Dpi(220, 102)).Size(ui.Dpi(90, 20)))
 	folderPath := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 126)).Width(ui.DpiX(650)).Height(ui.DpiY(26)))
 	browseFolder := ui.NewButton(wnd, ui.OptsButton().Text("Browse...").Position(ui.Dpi(884, 125)).Width(ui.DpiX(96)).Height(ui.DpiY(28)))
+	workspaceCtrls = append(workspaceCtrls, testAssetsTitle, folderLabel, folderPath, browseFolder)
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Selection").Position(ui.Dpi(220, 160)).Size(ui.Dpi(90, 20)))
+	selectionLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Selection").Position(ui.Dpi(220, 160)).Size(ui.Dpi(90, 20)))
 	selectionMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 184)).Width(ui.DpiX(150)).Texts("All files", "Single file", "Random file").Select(0))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Specific file (used only for Single file)").Position(ui.Dpi(396, 160)).Size(ui.Dpi(260, 20)))
+	specificFileLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Specific file (used only for Single file)").Position(ui.Dpi(396, 160)).Size(ui.Dpi(300, 20)))
 	filePath := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(396, 184)).Width(ui.DpiX(474)).Height(ui.DpiY(26)))
 	browseFile := ui.NewButton(wnd, ui.OptsButton().Text("Browse...").Position(ui.Dpi(884, 183)).Width(ui.DpiX(96)).Height(ui.DpiY(28)))
+	workspaceCtrls = append(workspaceCtrls, selectionLabel, selectionMode, specificFileLabel, filePath, browseFile)
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("02  FIERY IMPORT").Position(ui.Dpi(220, 234)).Size(ui.Dpi(180, 18)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Method").Position(ui.Dpi(220, 254)).Size(ui.Dpi(70, 20)))
+	importTitle := ui.NewStatic(wnd, ui.OptsStatic().Text("02  FIERY IMPORT").Position(ui.Dpi(220, 234)).Size(ui.Dpi(180, 18)))
+	methodLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Method").Position(ui.Dpi(220, 254)).Size(ui.Dpi(70, 20)))
 	method := ui.NewEdit(wnd, ui.OptsEdit().Text(http.MethodPost).Position(ui.Dpi(220, 278)).Width(ui.DpiX(92)).Height(ui.DpiY(26)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Import endpoint").Position(ui.Dpi(336, 254)).Size(ui.Dpi(120, 20)))
+	endpointLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Import endpoint").Position(ui.Dpi(336, 254)).Size(ui.Dpi(140, 20)))
 	url := ui.NewEdit(wnd, ui.OptsEdit().Text("/live/api/v5/jobs").Position(ui.Dpi(336, 278)).Width(ui.DpiX(510)).Height(ui.DpiY(26)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Workers").Position(ui.Dpi(860, 254)).Size(ui.Dpi(90, 20)))
+	workersLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Workers").Position(ui.Dpi(860, 254)).Size(ui.Dpi(90, 20)))
 	concurrency := ui.NewEdit(wnd, ui.OptsEdit().Text("1").Position(ui.Dpi(860, 278)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Run mode").Position(ui.Dpi(952, 254)).Size(ui.Dpi(90, 20)))
+	runModeLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Run mode").Position(ui.Dpi(952, 254)).Size(ui.Dpi(90, 20)))
 	runMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(952, 278)).Width(ui.DpiX(170)).Texts("Hold", "Process and Hold", "RIP", "Press Print", "Ready to Print", "Print").Select(0))
+	workspaceCtrls = append(workspaceCtrls, importTitle, methodLabel, method, endpointLabel, url, workersLabel, concurrency, runModeLabel, runMode)
 	strategyLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Strategy").Position(ui.Dpi(660, 398)).Size(ui.Dpi(90, 20)))
 	strategy := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(660, 420)).Width(ui.DpiX(160)).Texts("Selected only", "All permutations", "Pairwise", "Random sample").Select(0))
 	maxCasesLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Max cases").Position(ui.Dpi(840, 398)).Size(ui.Dpi(90, 20)))
@@ -185,7 +190,7 @@ func Run() int {
 		CtrlStyle(co.ES_MULTILINE|co.ES_AUTOVSCROLL|co.ES_READONLY|co.ES_WANTRETURN).
 		WndStyle(co.WS_CHILD|co.WS_VISIBLE|co.WS_VSCROLL|co.WS_TABSTOP))
 
-	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, queue: queue, pageSize: pageSize, resolution: resolution, colorMode: colorMode, mediaType: mediaType, printSpeed: printSpeed, multiSelects: multiSelects, multiSelectValues: map[string][]string{}, runMode: runMode, strategy: strategy, maxCases: maxCases, concurrency: concurrency, runButton: runButton, captureButton: captureButton, settingsButton: settingsButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status, progress: progress, settingsCtrls: settingsCtrls, capabilityCtrls: capabilityCtrls}
+	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, queue: queue, pageSize: pageSize, resolution: resolution, colorMode: colorMode, mediaType: mediaType, printSpeed: printSpeed, multiSelects: multiSelects, multiSelectValues: map[string][]string{}, runMode: runMode, strategy: strategy, maxCases: maxCases, concurrency: concurrency, runButton: runButton, captureButton: captureButton, settingsButton: settingsButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status, progress: progress, settingsCtrls: settingsCtrls, workspaceCtrls: workspaceCtrls, capabilityCtrls: capabilityCtrls}
 	mw.events()
 	return wnd.RunAsMain()
 }
@@ -290,6 +295,17 @@ func (m *MainWindow) showControls(handles []hwndControl, visible bool) {
 func (m *MainWindow) toggleSettings() {
 	m.settingsVisible = !m.settingsVisible
 	m.showControls(m.settingsCtrls, m.settingsVisible)
+	m.showControls(m.workspaceCtrls, !m.settingsVisible)
+	m.showControls(m.capabilityCtrls, !m.settingsVisible && m.hasCapturedCapabilities())
+	if m.settingsVisible {
+		m.setStatus("Settings are open. Enter server IP, secret key, and admin password, then close Settings.")
+		return
+	}
+	m.setStatus("Settings closed. Click Get server capabilities to discover supported options.")
+}
+
+func (m *MainWindow) hasCapturedCapabilities() bool {
+	return len(m.capabilities.Options) > 0 || len(m.capabilities.Queues) > 0
 }
 
 func (m *MainWindow) startRun() {
@@ -367,6 +383,9 @@ func (m *MainWindow) captureCapabilities() {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.running.Store(true)
+	m.settingsVisible = false
+	m.showControls(m.settingsCtrls, false)
+	m.showControls(m.workspaceCtrls, true)
 	m.showControls(m.capabilityCtrls, false)
 	m.progress.Hwnd().ShowWindow(co.SW_SHOW)
 	m.progress.SetMarquee(true)
