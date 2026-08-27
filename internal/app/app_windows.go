@@ -50,7 +50,7 @@ func Run() int {
 	_, _ = win.CoInitializeEx(co.COINIT_APARTMENTTHREADED | co.COINIT_DISABLE_OLE1DDE)
 	defer win.CoUninitialize()
 
-	wnd := ui.NewMain(ui.OptsMain().Title("API Automation").Size(ui.Dpi(1240, 820)))
+	wnd := ui.NewMain(ui.OptsMain().Title("API Automation").Size(ui.Dpi(windowWidth, windowHeight)))
 
 	// Enterprise shell: persistent navigation on the left, work area on the right.
 	ui.NewStatic(wnd, ui.OptsStatic().Text("API Automation").Position(ui.Dpi(18, 18)).Size(ui.Dpi(150, 22)))
@@ -60,55 +60,49 @@ func Run() int {
 	ui.NewStatic(wnd, ui.OptsStatic().Text("› Requests").Position(ui.Dpi(30, 144)).Size(ui.Dpi(130, 20)))
 	ui.NewStatic(wnd, ui.OptsStatic().Text("› Run History").Position(ui.Dpi(30, 172)).Size(ui.Dpi(130, 20)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Server Execution Workspace").Position(ui.Dpi(200, 18)).Size(ui.Dpi(260, 24)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Connect securely, choose test assets, and execute API automation against the server.").Position(ui.Dpi(200, 44)).Size(ui.Dpi(680, 22)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Server Execution Workspace").Position(ui.Dpi(220, 18)).Size(ui.Dpi(300, 24)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Connect securely, choose test assets, and execute API automation against the server.").Position(ui.Dpi(220, 48)).Size(ui.Dpi(720, 22)))
 
-	runButton := ui.NewButton(wnd, ui.OptsButton().Text("&Run automation").Position(ui.Dpi(930, 24)).Width(ui.DpiX(130)))
-	cancelButton := ui.NewButton(wnd, ui.OptsButton().Text("&Cancel").Position(ui.Dpi(1070, 24)).Width(ui.DpiX(90)))
+	runButton := ui.NewButton(wnd, ui.OptsButton().Text("&Run automation").Position(ui.Dpi(960, 24)).Width(ui.DpiX(132)).Height(ui.DpiY(28)))
+	cancelButton := ui.NewButton(wnd, ui.OptsButton().Text("&Cancel").Position(ui.Dpi(1104, 24)).Width(ui.DpiX(92)).Height(ui.DpiY(28)))
 
-	ui.NewButton(wnd, ui.OptsButton().Text("  Server connection  ").Position(ui.Dpi(190, 80)).Width(ui.DpiX(780)).Height(ui.DpiY(104)).CtrlStyle(co.BS_GROUPBOX))
-	ui.NewButton(wnd, ui.OptsButton().Text("  Test assets  ").Position(ui.Dpi(190, 186)).Width(ui.DpiX(780)).Height(ui.DpiY(166)).CtrlStyle(co.BS_GROUPBOX))
-	ui.NewButton(wnd, ui.OptsButton().Text("  Fiery import  ").Position(ui.Dpi(190, 356)).Width(ui.DpiX(960)).Height(ui.DpiY(104)).CtrlStyle(co.BS_GROUPBOX))
-	ui.NewButton(wnd, ui.OptsButton().Text("  Execution results  ").Position(ui.Dpi(190, 492)).Width(ui.DpiX(960)).Height(ui.DpiY(212)).CtrlStyle(co.BS_GROUPBOX))
-	ui.NewButton(wnd, ui.OptsButton().Text("  Activity log  ").Position(ui.Dpi(190, 708)).Width(ui.DpiX(960)).Height(ui.DpiY(84)).CtrlStyle(co.BS_GROUPBOX))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("01  SERVER CONNECTION").Position(ui.Dpi(220, 96)).Size(ui.Dpi(220, 18)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Server IP address").Position(ui.Dpi(220, 118)).Size(ui.Dpi(140, 20)))
+	serverIP := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 142)).Width(ui.DpiX(250)).Height(ui.DpiY(26)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Secret key").Position(ui.Dpi(492, 118)).Size(ui.Dpi(120, 20)))
+	secretKey := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(492, 142)).Width(ui.DpiX(300)).Height(ui.DpiY(26)).CtrlStyle(co.ES_PASSWORD|co.ES_AUTOHSCROLL|co.ES_NOHIDESEL))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Admin password").Position(ui.Dpi(814, 118)).Size(ui.Dpi(130, 20)))
+	password := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(814, 142)).Width(ui.DpiX(170)).Height(ui.DpiY(26)).CtrlStyle(co.ES_PASSWORD|co.ES_AUTOHSCROLL|co.ES_NOHIDESEL))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("SERVER CONNECTION").Position(ui.Dpi(200, 88)).Size(ui.Dpi(180, 18)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Server IP address").Position(ui.Dpi(200, 118)).Size(ui.Dpi(140, 20)))
-	serverIP := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(200, 142)).Width(ui.DpiX(250)).Height(ui.DpiY(26)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Secret key").Position(ui.Dpi(470, 118)).Size(ui.Dpi(120, 20)))
-	secretKey := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(470, 142)).Width(ui.DpiX(300)).Height(ui.DpiY(26)).CtrlStyle(co.ES_PASSWORD|co.ES_AUTOHSCROLL|co.ES_NOHIDESEL))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Admin password").Position(ui.Dpi(790, 118)).Size(ui.Dpi(130, 20)))
-	password := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(790, 142)).Width(ui.DpiX(164)).Height(ui.DpiY(26)).CtrlStyle(co.ES_PASSWORD|co.ES_AUTOHSCROLL|co.ES_NOHIDESEL))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("02  TEST ASSETS").Position(ui.Dpi(220, 204)).Size(ui.Dpi(180, 18)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Folder").Position(ui.Dpi(220, 224)).Size(ui.Dpi(90, 20)))
+	folderPath := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 248)).Width(ui.DpiX(650)).Height(ui.DpiY(26)))
+	browseFolder := ui.NewButton(wnd, ui.OptsButton().Text("Browse...").Position(ui.Dpi(884, 247)).Width(ui.DpiX(96)).Height(ui.DpiY(28)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("TEST FILES").Position(ui.Dpi(200, 194)).Size(ui.Dpi(160, 18)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Folder").Position(ui.Dpi(200, 224)).Size(ui.Dpi(90, 20)))
-	folderPath := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(200, 248)).Width(ui.DpiX(650)).Height(ui.DpiY(26)))
-	browseFolder := ui.NewButton(wnd, ui.OptsButton().Text("Browse...").Position(ui.Dpi(862, 247)).Width(ui.DpiX(92)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Selection").Position(ui.Dpi(220, 292)).Size(ui.Dpi(90, 20)))
+	selectionMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 316)).Width(ui.DpiX(150)).Texts("All files", "Single file", "Random file").Select(0))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Specific file (used only for Single file)").Position(ui.Dpi(396, 292)).Size(ui.Dpi(260, 20)))
+	filePath := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(396, 316)).Width(ui.DpiX(474)).Height(ui.DpiY(26)))
+	browseFile := ui.NewButton(wnd, ui.OptsButton().Text("Browse...").Position(ui.Dpi(884, 315)).Width(ui.DpiX(96)).Height(ui.DpiY(28)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Selection").Position(ui.Dpi(200, 288)).Size(ui.Dpi(90, 20)))
-	selectionMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(200, 312)).Width(ui.DpiX(150)).Texts("All files", "Single file", "Random file").Select(0))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Specific file (used only for Single file)").Position(ui.Dpi(372, 288)).Size(ui.Dpi(260, 20)))
-	filePath := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(372, 312)).Width(ui.DpiX(478)).Height(ui.DpiY(26)))
-	browseFile := ui.NewButton(wnd, ui.OptsButton().Text("Browse...").Position(ui.Dpi(862, 311)).Width(ui.DpiX(92)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("03  FIERY IMPORT").Position(ui.Dpi(220, 388)).Size(ui.Dpi(180, 18)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Method").Position(ui.Dpi(220, 408)).Size(ui.Dpi(70, 20)))
+	method := ui.NewEdit(wnd, ui.OptsEdit().Text(http.MethodPost).Position(ui.Dpi(220, 432)).Width(ui.DpiX(92)).Height(ui.DpiY(26)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Import endpoint").Position(ui.Dpi(336, 408)).Size(ui.Dpi(120, 20)))
+	url := ui.NewEdit(wnd, ui.OptsEdit().Text("/live/api/v5/jobs").Position(ui.Dpi(336, 432)).Width(ui.DpiX(610)).Height(ui.DpiY(26)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Workers").Position(ui.Dpi(970, 408)).Size(ui.Dpi(90, 20)))
+	concurrency := ui.NewEdit(wnd, ui.OptsEdit().Text("1").Position(ui.Dpi(970, 432)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("FIERY IMPORT").Position(ui.Dpi(200, 364)).Size(ui.Dpi(120, 18)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Method").Position(ui.Dpi(200, 394)).Size(ui.Dpi(70, 20)))
-	method := ui.NewEdit(wnd, ui.OptsEdit().Text(http.MethodPost).Position(ui.Dpi(200, 418)).Width(ui.DpiX(92)).Height(ui.DpiY(26)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Import endpoint").Position(ui.Dpi(312, 394)).Size(ui.Dpi(120, 20)))
-	url := ui.NewEdit(wnd, ui.OptsEdit().Text("/live/api/v5/jobs").Position(ui.Dpi(312, 418)).Width(ui.DpiX(610)).Height(ui.DpiY(26)))
-	ui.NewStatic(wnd, ui.OptsStatic().Text("Workers").Position(ui.Dpi(944, 394)).Size(ui.Dpi(90, 20)))
-	concurrency := ui.NewEdit(wnd, ui.OptsEdit().Text("1").Position(ui.Dpi(944, 418)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
+	status := ui.NewStatic(wnd, ui.OptsStatic().Text("Ready. Provide server IP, secret key, admin password, and a test file folder.").Position(ui.Dpi(220, 488)).Size(ui.Dpi(940, 22)))
 
-	status := ui.NewStatic(wnd, ui.OptsStatic().Text("Ready. Provide server IP, secret key, and a test file folder.").Position(ui.Dpi(200, 464)).Size(ui.Dpi(940, 22)))
-
-	ui.NewStatic(wnd, ui.OptsStatic().Text("EXECUTION RESULTS").Position(ui.Dpi(200, 500)).Size(ui.Dpi(160, 18)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("04  EXECUTION RESULTS").Position(ui.Dpi(220, 526)).Size(ui.Dpi(200, 18)))
 	results := ui.NewListView(wnd, ui.OptsListView().
-		Position(ui.Dpi(200, 526)).Size(ui.Dpi(940, 170)).
+		Position(ui.Dpi(220, 552)).Size(ui.Dpi(940, 184)).
 		CtrlExStyle(co.LVS_EX_FULLROWSELECT|co.LVS_EX_GRIDLINES).
 		Column("Request", ui.DpiX(190)).Column("Method", ui.DpiX(90)).Column("Status", ui.DpiX(90)).Column("Duration", ui.DpiX(120)).Column("URL", ui.DpiX(420)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("ACTIVITY LOG").Position(ui.Dpi(200, 716)).Size(ui.Dpi(160, 18)))
-	log := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(200, 742)).Width(ui.DpiX(940)).Height(ui.DpiY(42)).
+	ui.NewStatic(wnd, ui.OptsStatic().Text("05  ACTIVITY LOG").Position(ui.Dpi(220, 754)).Size(ui.Dpi(180, 18)))
+	log := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 780)).Width(ui.DpiX(940)).Height(ui.DpiY(48)).
 		CtrlStyle(co.ES_MULTILINE|co.ES_AUTOVSCROLL|co.ES_READONLY|co.ES_WANTRETURN).
 		WndStyle(co.WS_CHILD|co.WS_VISIBLE|co.WS_VSCROLL|co.WS_TABSTOP))
 
