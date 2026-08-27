@@ -2,7 +2,7 @@ package app
 
 const (
 	windowWidth  = 1280
-	windowHeight = 860
+	windowHeight = 980
 )
 
 type uiRect struct {
@@ -27,8 +27,14 @@ func enterpriseLayoutRects() []uiRect {
 		{Name: "method", X: 220, Y: 432, W: 92, H: 26, Layer: "input"},
 		{Name: "url", X: 336, Y: 432, W: 610, H: 26, Layer: "input"},
 		{Name: "concurrency", X: 970, Y: 432, W: 76, H: 26, Layer: "input"},
-		{Name: "status", X: 220, Y: 488, W: 940, H: 22, Layer: "status"},
-		{Name: "results", X: 220, Y: 552, W: 940, H: 184, Layer: "surface"},
-		{Name: "log", X: 220, Y: 780, W: 940, H: 48, Layer: "surface"},
+		{Name: "queue", X: 220, Y: 502, W: 190, H: 26, Layer: "input"},
+		{Name: "pageSize", X: 432, Y: 502, W: 190, H: 26, Layer: "input"},
+		{Name: "resolution", X: 644, Y: 502, W: 150, H: 26, Layer: "input"},
+		{Name: "colorMode", X: 816, Y: 502, W: 150, H: 26, Layer: "input"},
+		{Name: "mediaType", X: 220, Y: 570, W: 260, H: 26, Layer: "input"},
+		{Name: "printSpeed", X: 502, Y: 570, W: 150, H: 26, Layer: "input"},
+		{Name: "status", X: 220, Y: 626, W: 940, H: 22, Layer: "status"},
+		{Name: "results", X: 220, Y: 690, W: 940, H: 184, Layer: "surface"},
+		{Name: "log", X: 220, Y: 918, W: 940, H: 48, Layer: "surface"},
 	}
 }

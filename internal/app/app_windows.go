@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"api-automation/internal/capabilities"
 	"api-automation/internal/fiery"
 	"api-automation/internal/files"
 	"api-automation/internal/model"
@@ -34,6 +35,12 @@ type MainWindow struct {
 	selectionMode *ui.ComboBox
 	url           *ui.Edit
 	method        *ui.Edit
+	queue         *ui.ComboBox
+	pageSize      *ui.ComboBox
+	resolution    *ui.ComboBox
+	colorMode     *ui.ComboBox
+	mediaType     *ui.ComboBox
+	printSpeed    *ui.ComboBox
 	concurrency   *ui.Edit
 	runButton     *ui.Button
 	captureButton *ui.Button
@@ -96,20 +103,34 @@ func Run() int {
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Workers").Position(ui.Dpi(970, 408)).Size(ui.Dpi(90, 20)))
 	concurrency := ui.NewEdit(wnd, ui.OptsEdit().Text("1").Position(ui.Dpi(970, 432)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
 
-	status := ui.NewStatic(wnd, ui.OptsStatic().Text("Ready. Provide server IP, secret key, admin password, and a test file folder.").Position(ui.Dpi(220, 488)).Size(ui.Dpi(940, 22)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("04  SERVER CAPABILITIES").Position(ui.Dpi(220, 476)).Size(ui.Dpi(220, 18)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Queue").Position(ui.Dpi(220, 478+0)).Size(ui.Dpi(90, 20)))
+	queue := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 502)).Width(ui.DpiX(190)).Texts("Capture capabilities first").Select(0))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Page size").Position(ui.Dpi(432, 478)).Size(ui.Dpi(90, 20)))
+	pageSize := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(432, 502)).Width(ui.DpiX(190)).Texts("Capture capabilities first").Select(0))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Resolution").Position(ui.Dpi(644, 478)).Size(ui.Dpi(90, 20)))
+	resolution := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(644, 502)).Width(ui.DpiX(150)).Texts("Capture first").Select(0))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Color mode").Position(ui.Dpi(816, 478)).Size(ui.Dpi(90, 20)))
+	colorMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(816, 502)).Width(ui.DpiX(150)).Texts("Capture first").Select(0))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Media type").Position(ui.Dpi(220, 546)).Size(ui.Dpi(90, 20)))
+	mediaType := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 570)).Width(ui.DpiX(260)).Texts("Capture capabilities first").Select(0))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("Print speed").Position(ui.Dpi(502, 546)).Size(ui.Dpi(90, 20)))
+	printSpeed := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(502, 570)).Width(ui.DpiX(150)).Texts("Capture first").Select(0))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("04  EXECUTION RESULTS").Position(ui.Dpi(220, 526)).Size(ui.Dpi(200, 18)))
+	status := ui.NewStatic(wnd, ui.OptsStatic().Text("Ready. Provide server IP, secret key, admin password, and a test file folder.").Position(ui.Dpi(220, 626)).Size(ui.Dpi(940, 22)))
+
+	ui.NewStatic(wnd, ui.OptsStatic().Text("05  EXECUTION RESULTS").Position(ui.Dpi(220, 664)).Size(ui.Dpi(200, 18)))
 	results := ui.NewListView(wnd, ui.OptsListView().
-		Position(ui.Dpi(220, 552)).Size(ui.Dpi(940, 184)).
+		Position(ui.Dpi(220, 690)).Size(ui.Dpi(940, 184)).
 		CtrlExStyle(co.LVS_EX_FULLROWSELECT|co.LVS_EX_GRIDLINES).
 		Column("Request", ui.DpiX(190)).Column("Method", ui.DpiX(90)).Column("Status", ui.DpiX(90)).Column("Duration", ui.DpiX(120)).Column("URL", ui.DpiX(420)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("05  ACTIVITY LOG").Position(ui.Dpi(220, 754)).Size(ui.Dpi(180, 18)))
-	log := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 780)).Width(ui.DpiX(940)).Height(ui.DpiY(48)).
+	ui.NewStatic(wnd, ui.OptsStatic().Text("06  ACTIVITY LOG").Position(ui.Dpi(220, 892)).Size(ui.Dpi(180, 18)))
+	log := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 918)).Width(ui.DpiX(940)).Height(ui.DpiY(48)).
 		CtrlStyle(co.ES_MULTILINE|co.ES_AUTOVSCROLL|co.ES_READONLY|co.ES_WANTRETURN).
 		WndStyle(co.WS_CHILD|co.WS_VISIBLE|co.WS_VSCROLL|co.WS_TABSTOP))
 
-	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, concurrency: concurrency, runButton: runButton, captureButton: captureButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status}
+	mw := &MainWindow{wnd: wnd, serverIP: serverIP, secretKey: secretKey, password: password, folderPath: folderPath, filePath: filePath, selectionMode: selectionMode, url: url, method: method, queue: queue, pageSize: pageSize, resolution: resolution, colorMode: colorMode, mediaType: mediaType, printSpeed: printSpeed, concurrency: concurrency, runButton: runButton, captureButton: captureButton, cancelButton: cancelButton, browseFolder: browseFolder, browseFile: browseFile, results: results, log: log, status: status}
 	mw.events()
 	return wnd.RunAsMain()
 }
@@ -247,7 +268,8 @@ func (m *MainWindow) runCapabilityCapture(ctx context.Context, server model.Serv
 			m.appendLog("Capture failed: %s", err)
 			return
 		}
-		m.setStatus("Capability capture saved.")
+		m.populateCapabilities(capabilities.FromSnapshot(snapshot))
+		m.setStatus("Capability capture saved and UI populated from server response.")
 		m.appendLog("Captured %d v5 endpoint response(s)", len(snapshot.Endpoints))
 		m.appendLog("Saved snapshot: %s", path)
 	})
@@ -259,6 +281,53 @@ func captureDirectory() string {
 		return "captures"
 	}
 	return filepath.Join(filepath.Dir(exe), "captures")
+}
+
+func (m *MainWindow) populateCapabilities(model capabilities.Model) {
+	m.replaceComboItems(m.queue, availableQueueNames(model.Queues), "No available queues")
+	m.replaceOptionItems(m.pageSize, model, "PageSize")
+	m.replaceOptionItems(m.resolution, model, "EFResolution")
+	m.replaceOptionItems(m.colorMode, model, "EFColorMode")
+	m.replaceOptionItems(m.mediaType, model, "EFMediaType")
+	m.replaceOptionItems(m.printSpeed, model, "EFPrintSpeed")
+	m.appendLog("Server: %s serial=%s version=%s", fallback(model.ServerName, "unknown"), fallback(model.SerialNumber, "unknown"), fallback(model.Version, "unknown"))
+}
+
+func (m *MainWindow) replaceOptionItems(combo *ui.ComboBox, model capabilities.Model, optionID string) {
+	option, ok := model.OptionByID(optionID)
+	if !ok {
+		m.replaceComboItems(combo, nil, "Not reported")
+		return
+	}
+	m.replaceComboItems(combo, option.Values, "No values reported")
+}
+
+func (m *MainWindow) replaceComboItems(combo *ui.ComboBox, items []string, emptyText string) {
+	combo.DeleteAllItems()
+	if len(items) == 0 {
+		combo.AddItem(emptyText)
+		combo.SelectIndex(0)
+		return
+	}
+	combo.AddItem(items...)
+	combo.SelectIndex(0)
+}
+
+func availableQueueNames(queues []capabilities.Queue) []string {
+	names := make([]string, 0, len(queues))
+	for _, queue := range queues {
+		if queue.Available {
+			names = append(names, queue.Name)
+		}
+	}
+	return names
+}
+
+func fallback(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func (m *MainWindow) runFieryAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int) {
