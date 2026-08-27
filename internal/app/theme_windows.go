@@ -22,7 +22,7 @@ type appTheme struct {
 
 func newAppTheme() appTheme {
 	return appTheme{
-		windowBg: solidBrush(win.RGB(246, 248, 251)),
+		windowBg: solidBrush(win.RGB(232, 240, 254)),
 		inputBg:  solidBrush(win.RGB(255, 255, 255)),
 	}
 }
@@ -44,6 +44,13 @@ func (t *appTheme) dispose() {
 }
 
 func (t appTheme) apply(m *MainWindow) {
+	m.wnd.On().WmEraseBkgnd(func(p ui.WmEraseBkgnd) int {
+		rc, err := m.wnd.Hwnd().GetClientRect()
+		if err == nil {
+			_ = p.Hdc().FillRect(&rc, t.windowBg)
+		}
+		return 1
+	})
 	m.wnd.On().WmCtlColorDlg(func(p ui.WmCtlColor) win.HBRUSH { return t.windowBg })
 	m.wnd.On().WmCtlColorStatic(func(p ui.WmCtlColor) win.HBRUSH {
 		_, _ = p.Hdc().SetBkMode(co.BKMODE_TRANSPARENT)

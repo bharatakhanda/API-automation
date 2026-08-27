@@ -105,8 +105,8 @@ func Run() (exitCode int) {
 
 	settingsButton := ui.NewButton(wnd, ui.OptsButton().Text("&Settings").Position(ui.Dpi(620, 24)).Width(ui.DpiX(110)).Height(ui.DpiY(30)))
 	captureButton := ui.NewButton(wnd, ui.OptsButton().Text("Get server &capabilities").Position(ui.Dpi(742, 24)).Width(ui.DpiX(240)).Height(ui.DpiY(30)))
-	runButton := ui.NewButton(wnd, ui.OptsButton().Text("&Run automation").Position(ui.Dpi(994, 24)).Width(ui.DpiX(142)).Height(ui.DpiY(30)))
-	cancelButton := ui.NewButton(wnd, ui.OptsButton().Text("&Cancel run").Position(ui.Dpi(994, 60)).Width(ui.DpiX(142)).Height(ui.DpiY(28)))
+	runButton := ui.NewButton(wnd, ui.OptsButton().Text("&Run automation").Position(ui.Dpi(1010, 24)).Width(ui.DpiX(160)).Height(ui.DpiY(30)))
+	cancelButton := ui.NewButton(wnd, ui.OptsButton().Text("&Cancel run").Position(ui.Dpi(1010, 60)).Width(ui.DpiX(160)).Height(ui.DpiY(28)))
 	progress := ui.NewProgressBar(wnd, ui.OptsProgressBar().Position(ui.Dpi(742, 62)).Size(ui.Dpi(240, 18)))
 
 	var settingsCtrls []hwndControl
@@ -149,55 +149,55 @@ func Run() (exitCode int) {
 	runModeLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Run mode").Position(ui.Dpi(952, 254)).Size(ui.Dpi(90, 20)))
 	runMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(952, 278)).Width(ui.DpiX(170)).Texts("Hold", "Process and Hold", "RIP", "Press Print", "Ready to Print", "Print").Select(0))
 	workspaceCtrls = append(workspaceCtrls, importTitle, methodLabel, method, endpointLabel, url, workersLabel, concurrency, runModeLabel, runMode)
-	strategyLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Strategy").Position(ui.Dpi(660, 398)).Size(ui.Dpi(90, 20)))
-	strategy := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(660, 420)).Width(ui.DpiX(160)).Texts("Selected only", "All permutations", "Pairwise", "Random sample").Select(0))
-	maxCasesLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Max cases").Position(ui.Dpi(840, 398)).Size(ui.Dpi(90, 20)))
-	maxCases := ui.NewEdit(wnd, ui.OptsEdit().Text("100").Position(ui.Dpi(840, 420)).Width(ui.DpiX(76)).Height(ui.DpiY(26)))
+	strategyLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Strategy").Position(ui.Dpi(720, 424)).Size(ui.Dpi(100, 20)))
+	strategy := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(720, 446)).Width(ui.DpiX(170)).Texts("Selected only", "All permutations", "Pairwise", "Random sample").Select(0))
+	maxCasesLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Max cases").Position(ui.Dpi(920, 424)).Size(ui.Dpi(100, 20)))
+	maxCases := ui.NewEdit(wnd, ui.OptsEdit().Text("100").Position(ui.Dpi(920, 446)).Width(ui.DpiX(90)).Height(ui.DpiY(26)))
 
 	var capabilityCtrls []hwndControl
-	capTitle := ui.NewStatic(wnd, ui.OptsStatic().Text("03  SERVER CAPABILITIES").Position(ui.Dpi(220, 326)).Size(ui.Dpi(220, 18)))
+	capTitle := ui.NewStatic(wnd, ui.OptsStatic().Text("03  SERVER CAPABILITIES").Position(ui.Dpi(220, 326)).Size(ui.Dpi(240, 20)))
 	capabilityCtrls = append(capabilityCtrls, capTitle)
-	queueLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Queue").Position(ui.Dpi(220, 330)).Size(ui.Dpi(90, 20)))
+	queueLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Queue").Position(ui.Dpi(220, 348)).Size(ui.Dpi(90, 20)))
 	capabilityCtrls = append(capabilityCtrls, queueLabel)
-	queue := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 354)).Width(ui.DpiX(170)).Texts("Capture capabilities first").Select(0))
+	queue := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 372)).Width(ui.DpiX(190)).Texts("Capture capabilities first").Select(0))
 	capabilityCtrls = append(capabilityCtrls, queue)
-	pageSizeLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Page size").Position(ui.Dpi(410, 330)).Size(ui.Dpi(90, 20)))
+	pageSizeLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Page size").Position(ui.Dpi(430, 348)).Size(ui.Dpi(100, 20)))
 	capabilityCtrls = append(capabilityCtrls, pageSizeLabel)
-	pageSize := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(410, 354)).Width(ui.DpiX(170)).Texts("Capture capabilities first").Select(0))
+	pageSize := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(430, 372)).Width(ui.DpiX(180)).Texts("Capture capabilities first").Select(0))
 	capabilityCtrls = append(capabilityCtrls, pageSize)
-	resolutionLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Resolution").Position(ui.Dpi(600, 330)).Size(ui.Dpi(90, 20)))
+	resolutionLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Resolution").Position(ui.Dpi(630, 348)).Size(ui.Dpi(100, 20)))
 	capabilityCtrls = append(capabilityCtrls, resolutionLabel)
-	resolution := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(600, 354)).Width(ui.DpiX(140)).Texts("Capture first").Select(0))
+	resolution := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(630, 372)).Width(ui.DpiX(170)).Texts("Capture first").Select(0))
 	capabilityCtrls = append(capabilityCtrls, resolution)
-	colorModeLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Color mode").Position(ui.Dpi(760, 330)).Size(ui.Dpi(90, 20)))
+	colorModeLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Color mode").Position(ui.Dpi(820, 348)).Size(ui.Dpi(100, 20)))
 	capabilityCtrls = append(capabilityCtrls, colorModeLabel)
-	colorMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(760, 354)).Width(ui.DpiX(140)).Texts("Capture first").Select(0))
+	colorMode := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(820, 372)).Width(ui.DpiX(170)).Texts("Capture first").Select(0))
 	capabilityCtrls = append(capabilityCtrls, colorMode)
-	mediaLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Media type").Position(ui.Dpi(220, 396)).Size(ui.Dpi(90, 20)))
+	mediaLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Media type").Position(ui.Dpi(220, 424)).Size(ui.Dpi(100, 20)))
 	capabilityCtrls = append(capabilityCtrls, mediaLabel)
-	mediaType := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 420)).Width(ui.DpiX(240)).Texts("Capture capabilities first").Select(0))
+	mediaType := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(220, 446)).Width(ui.DpiX(280)).Texts("Capture capabilities first").Select(0))
 	capabilityCtrls = append(capabilityCtrls, mediaType)
-	printSpeedLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Print speed").Position(ui.Dpi(480, 396)).Size(ui.Dpi(90, 20)))
+	printSpeedLabel := ui.NewStatic(wnd, ui.OptsStatic().Text("Print speed").Position(ui.Dpi(520, 424)).Size(ui.Dpi(100, 20)))
 	capabilityCtrls = append(capabilityCtrls, printSpeedLabel)
-	printSpeed := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(480, 420)).Width(ui.DpiX(150)).Texts("Capture first").Select(0))
+	printSpeed := ui.NewComboBox(wnd, ui.OptsComboBox().Position(ui.Dpi(520, 446)).Width(ui.DpiX(170)).Texts("Capture first").Select(0))
 	capabilityCtrls = append(capabilityCtrls, printSpeed)
 
-	multiTitle := ui.NewStatic(wnd, ui.OptsStatic().Text("Multi-select values for permutation strategies").Position(ui.Dpi(220, 462)).Size(ui.Dpi(320, 18)))
+	multiTitle := ui.NewStatic(wnd, ui.OptsStatic().Text("Multi-select values for permutation strategies").Position(ui.Dpi(220, 492)).Size(ui.Dpi(360, 20)))
 	capabilityCtrls = append(capabilityCtrls, multiTitle)
 	multiSelects, multiHandles := buildMultiSelectControls(wnd)
 	capabilityCtrls = append(capabilityCtrls, multiHandles...)
 	capabilityCtrls = append(capabilityCtrls, strategyLabel, strategy, maxCasesLabel, maxCases)
 
-	status := ui.NewStatic(wnd, ui.OptsStatic().Text("Open Settings, enter server details, then click Get capabilities of the server.").Position(ui.Dpi(220, 560)).Size(ui.Dpi(940, 22)))
+	status := ui.NewStatic(wnd, ui.OptsStatic().Text("Open Settings, enter server details, then click Get server capabilities.").Position(ui.Dpi(220, 670)).Size(ui.Dpi(980, 24)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("04  EXECUTION RESULTS").Position(ui.Dpi(220, 586)).Size(ui.Dpi(200, 18)))
+	ui.NewStatic(wnd, ui.OptsStatic().Text("04  EXECUTION RESULTS").Position(ui.Dpi(220, 702)).Size(ui.Dpi(220, 20)))
 	results := ui.NewListView(wnd, ui.OptsListView().
-		Position(ui.Dpi(220, 612)).Size(ui.Dpi(940, 86)).
+		Position(ui.Dpi(220, 724)).Size(ui.Dpi(980, 82)).
 		CtrlExStyle(co.LVS_EX_FULLROWSELECT|co.LVS_EX_GRIDLINES).
-		Column("Request", ui.DpiX(190)).Column("Method", ui.DpiX(90)).Column("Status", ui.DpiX(90)).Column("Duration", ui.DpiX(120)).Column("URL", ui.DpiX(420)))
+		Column("Request", ui.DpiX(210)).Column("Method", ui.DpiX(90)).Column("Status", ui.DpiX(90)).Column("Duration", ui.DpiX(120)).Column("URL / Error detail", ui.DpiX(450)))
 
-	ui.NewStatic(wnd, ui.OptsStatic().Text("05  ACTIVITY LOG").Position(ui.Dpi(220, 706)).Size(ui.Dpi(180, 18)))
-	log := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 730)).Width(ui.DpiX(940)).Height(ui.DpiY(24)).
+	ui.NewStatic(wnd, ui.OptsStatic().Text("05  ACTIVITY LOG").Position(ui.Dpi(220, 814)).Size(ui.Dpi(200, 20)))
+	log := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 838)).Width(ui.DpiX(980)).Height(ui.DpiY(48)).
 		CtrlStyle(co.ES_MULTILINE|co.ES_AUTOVSCROLL|co.ES_READONLY|co.ES_WANTRETURN).
 		WndStyle(co.WS_CHILD|co.WS_VISIBLE|co.WS_VSCROLL|co.WS_TABSTOP))
 
@@ -213,11 +213,11 @@ func buildMultiSelectControls(wnd *ui.Main) (map[string][]*ui.CheckBox, []hwndCo
 		label string
 		x, y  int
 	}{
-		{id: "PageSize", label: "Page size", x: 220, y: 486},
-		{id: "EFResolution", label: "Resolution", x: 410, y: 486},
-		{id: "EFColorMode", label: "Color mode", x: 600, y: 486},
-		{id: "EFMediaType", label: "Media type", x: 790, y: 486},
-		{id: "EFPrintSpeed", label: "Print speed", x: 980, y: 486},
+		{id: "PageSize", label: "Page size", x: 220, y: 520},
+		{id: "EFResolution", label: "Resolution", x: 420, y: 520},
+		{id: "EFColorMode", label: "Color mode", x: 620, y: 520},
+		{id: "EFMediaType", label: "Media type", x: 820, y: 520},
+		{id: "EFPrintSpeed", label: "Print speed", x: 1020, y: 520},
 	}
 	controls := make(map[string][]*ui.CheckBox, len(defs))
 	var handles []hwndControl
@@ -225,7 +225,7 @@ func buildMultiSelectControls(wnd *ui.Main) (map[string][]*ui.CheckBox, []hwndCo
 		label := ui.NewStatic(wnd, ui.OptsStatic().Text(def.label).Position(ui.Dpi(def.x, def.y)).Size(ui.Dpi(150, 18)))
 		handles = append(handles, label)
 		for i := 0; i < 4; i++ {
-			chk := ui.NewCheckBox(wnd, ui.OptsCheckBox().Text("-").Position(ui.Dpi(def.x, def.y+24+(i*22))).Size(ui.Dpi(178, 20)))
+			chk := ui.NewCheckBox(wnd, ui.OptsCheckBox().Text("-").Position(ui.Dpi(def.x, def.y+24+(i*24))).Size(ui.Dpi(190, 22)))
 			handles = append(handles, chk)
 			controls[def.id] = append(controls[def.id], chk)
 		}
