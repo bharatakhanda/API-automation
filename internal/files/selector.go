@@ -3,13 +3,27 @@ package files
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"api-automation/internal/model"
 )
+
+var supportedJobExtensions = map[string]bool{
+	".pdf":  true,
+	".ps":   true,
+	".eps":  true,
+	".prn":  true,
+	".tif":  true,
+	".tiff": true,
+	".jpg":  true,
+	".jpeg": true,
+	".png":  true,
+}
 
 // Select resolves the effective test files based on the requested selection mode.
 func Select(selection model.TestFileSelection) ([]string, error) {
@@ -51,6 +65,9 @@ func Select(selection model.TestFileSelection) ([]string, error) {
 		if info.IsDir() {
 			return nil, errors.New("selected path is a directory")
 		}
+		if !isSupportedJobFile(cleanFile) {
+			return nil, fmt.Errorf("selected file %q is not a supported Fiery job file; supported extensions: %s", filepath.Base(cleanFile), supportedExtensionList())
+		}
 		return []string{cleanFile}, nil
 	case model.FileSelectionRandom:
 		idx, err := secureRandomIndex(len(files))
@@ -78,7 +95,7 @@ func listRegularFiles(folder string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if info.Mode().IsRegular() {
+		if info.Mode().IsRegular() && isSupportedJobFile(path) {
 			abs, err := filepath.Abs(path)
 			if err != nil {
 				return nil, err
@@ -88,6 +105,19 @@ func listRegularFiles(folder string) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+func isSupportedJobFile(path string) bool {
+	return supportedJobExtensions[strings.ToLower(filepath.Ext(path))]
+}
+
+func supportedExtensionList() string {
+	extensions := make([]string, 0, len(supportedJobExtensions))
+	for ext := range supportedJobExtensions {
+		extensions = append(extensions, ext)
+	}
+	sort.Strings(extensions)
+	return strings.Join(extensions, ", ")
 }
 
 func secureRandomIndex(length int) (int, error) {

@@ -10,12 +10,16 @@ import (
 
 func TestSelectAllSingleAndRandom(t *testing.T) {
 	dir := t.TempDir()
-	first := filepath.Join(dir, "a.json")
-	second := filepath.Join(dir, "b.json")
-	if err := os.WriteFile(first, []byte("{}"), 0o600); err != nil {
+	first := filepath.Join(dir, "a.pdf")
+	second := filepath.Join(dir, "b.ps")
+	ignored := filepath.Join(dir, "api-automation.exe")
+	if err := os.WriteFile(first, []byte("%PDF"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(second, []byte("{}"), 0o600); err != nil {
+	if err := os.WriteFile(second, []byte("%!PS"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ignored, []byte("exe"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -31,7 +35,7 @@ func TestSelectAllSingleAndRandom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(single) != 1 || filepath.Base(single[0]) != "a.json" {
+	if len(single) != 1 || filepath.Base(single[0]) != "a.pdf" {
 		t.Fatalf("single = %#v", single)
 	}
 
@@ -46,7 +50,7 @@ func TestSelectAllSingleAndRandom(t *testing.T) {
 
 func TestSelectSingleRejectsOutsideFolder(t *testing.T) {
 	dir := t.TempDir()
-	outside := filepath.Join(t.TempDir(), "outside.json")
+	outside := filepath.Join(t.TempDir(), "outside.pdf")
 	if err := os.WriteFile(outside, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
