@@ -22,6 +22,14 @@ const (
 	apiV5           = "/live/api/v5"
 )
 
+// DefaultSecretKey is intentionally empty in source. For temporary field testing,
+// it can be populated at build time with:
+//
+//	-ldflags "-X api-automation/internal/fiery.DefaultSecretKey=<key>"
+//
+// Do not commit real secrets to source control.
+var DefaultSecretKey string
+
 // Config describes the Fiery server connection learned from the reference DATA implementation.
 type Config struct {
 	ServerIP    string

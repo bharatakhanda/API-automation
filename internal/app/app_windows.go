@@ -73,7 +73,7 @@ func Run() int {
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Server IP address").Position(ui.Dpi(220, 118)).Size(ui.Dpi(140, 20)))
 	serverIP := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(220, 142)).Width(ui.DpiX(250)).Height(ui.DpiY(26)))
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Secret key").Position(ui.Dpi(492, 118)).Size(ui.Dpi(120, 20)))
-	secretKey := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(492, 142)).Width(ui.DpiX(300)).Height(ui.DpiY(26)).CtrlStyle(co.ES_PASSWORD|co.ES_AUTOHSCROLL|co.ES_NOHIDESEL))
+	secretKey := ui.NewEdit(wnd, ui.OptsEdit().Text(fiery.DefaultSecretKey).Position(ui.Dpi(492, 142)).Width(ui.DpiX(300)).Height(ui.DpiY(26)).CtrlStyle(co.ES_PASSWORD|co.ES_AUTOHSCROLL|co.ES_NOHIDESEL))
 	ui.NewStatic(wnd, ui.OptsStatic().Text("Admin password").Position(ui.Dpi(814, 118)).Size(ui.Dpi(130, 20)))
 	password := ui.NewEdit(wnd, ui.OptsEdit().Position(ui.Dpi(814, 142)).Width(ui.DpiX(170)).Height(ui.DpiY(26)).CtrlStyle(co.ES_PASSWORD|co.ES_AUTOHSCROLL|co.ES_NOHIDESEL))
 
