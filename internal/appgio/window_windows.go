@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/color"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime/debug"
 	"sort"
@@ -64,7 +65,7 @@ type Window struct {
 	endpoint, workers, maxCases   widget.Editor
 
 	settingsButton, captureButton, runButton, cancelButton widget.Clickable
-	testServerButton                                       widget.Clickable
+	testServerButton, apiTraceButton                       widget.Clickable
 	browseFolderButton, browseFileButton                   widget.Clickable
 	navButtons                                             []widget.Clickable
 	allFilesButton, singleFileButton, randomFileButton     widget.Clickable
@@ -94,6 +95,27 @@ type Window struct {
 }
 
 type resultRow struct{ File, Method, Status, Duration, Detail string }
+
+type apiTraceStage struct {
+	Name      string                 `json:"name"`
+	Captured  string                 `json:"capturedAt"`
+	Responses []fiery.JobRawResponse `json:"responses"`
+}
+
+type apiTraceReport struct {
+	CapturedAt     string             `json:"capturedAt"`
+	Server         string             `json:"server"`
+	File           string             `json:"file"`
+	Mode           string             `json:"mode"`
+	JobID          string             `json:"jobId,omitempty"`
+	Attributes     map[string]string  `json:"attributes"`
+	UpdateProtocol string             `json:"updateProtocol"`
+	Import         fiery.ImportResult `json:"import"`
+	Stages         []apiTraceStage    `json:"stages"`
+	Final          map[string]string  `json:"finalAttributes,omitempty"`
+	Result         string             `json:"result"`
+	Error          string             `json:"error,omitempty"`
+}
 
 type runMode struct {
 	Label, ImportQueue string
@@ -180,6 +202,9 @@ func (w *Window) Run() error {
 }
 
 func (w *Window) handleClicks(gtx layout.Context) {
+	for w.apiTraceButton.Clicked(gtx) {
+		w.startAPITrace()
+	}
 	for w.testServerButton.Clicked(gtx) {
 		w.testServerConnection()
 	}
@@ -489,7 +514,7 @@ func (w *Window) captureProgressPanel(gtx layout.Context) layout.Dimensions {
 }
 
 func (w *Window) strategySelector(gtx layout.Context) layout.Dimensions {
-	return row(gtx, toggle(w.theme, &w.selectedOnlyButton, "Selected only", w.strategy == combinations.StrategySelected), toggle(w.theme, &w.allPermButton, "All permutations", w.strategy == combinations.StrategyAll), toggle(w.theme, &w.pairwiseButton, "Pairwise", w.strategy == combinations.StrategyPairwise), field(w.theme, "Max cases", &w.maxCases, 110))
+	return row(gtx, toggle(w.theme, &w.selectedOnlyButton, "Selected only", w.strategy == combinations.StrategySelected), toggle(w.theme, &w.allPermButton, "All permutations", w.strategy == combinations.StrategyAll), toggle(w.theme, &w.pairwiseButton, "Pairwise", w.strategy == combinations.StrategyPairwise), field(w.theme, "Max cases", &w.maxCases, 110), browseButton(w.theme, &w.apiTraceButton, "Capture API trace"))
 }
 
 func (w *Window) optionGrid(gtx layout.Context, model capabilities.Model) layout.Dimensions {
@@ -725,6 +750,135 @@ func (w *Window) logCapabilitySummary(model capabilities.Model) {
 		}
 		w.addLog("Capability group %s: %s", group.Name, strings.Join(keys, ", "))
 	}
+}
+
+func (w *Window) startAPITrace() {
+	if w.running.Load() {
+		return
+	}
+	server, ok := w.server()
+	if !ok {
+		return
+	}
+	selectedFiles, err := files.Select(model.TestFileSelection{FolderPath: strings.TrimSpace(w.folderPath.Text()), FilePath: strings.TrimSpace(w.filePath.Text()), Mode: w.fileMode()})
+	if err != nil {
+		w.setStatus("API trace file selection failed: " + err.Error())
+		return
+	}
+	if len(selectedFiles) == 0 {
+		w.setStatus("API trace requires at least one supported test file.")
+		return
+	}
+	combos := w.selectedCombinations()
+	if len(combos) == 0 || len(combos[0]) == 0 {
+		w.setStatus("Select at least one capability value before capturing an API trace.")
+		return
+	}
+	attrs := combinationToAttributes(combos[0])
+	ctx, cancel := context.WithCancel(context.Background())
+	w.cancel = cancel
+	w.running.Store(true)
+	w.setStatus("Capturing controlled API trace...")
+	go func() {
+		defer func() {
+			w.running.Store(false)
+			w.window.Invalidate()
+		}()
+		report := w.runAPITrace(ctx, server, selectedFiles[0], attrs)
+		path, saveErr := saveAPITrace(report)
+		if saveErr != nil {
+			w.setStatus("API trace save failed: " + saveErr.Error())
+			return
+		}
+		w.addLog("Saved API trace: %s", path)
+		if report.Error != "" {
+			w.setStatus("API trace completed with error. See " + path)
+			return
+		}
+		w.setStatus("API trace completed: " + report.Result + ". See " + path)
+	}()
+}
+
+func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection, file string, attrs map[string]string) apiTraceReport {
+	mode := runModes[1] // Process and Hold provides deterministic post-RIP readback.
+	report := apiTraceReport{
+		CapturedAt:     time.Now().Format(time.RFC3339Nano),
+		Server:         server.IPAddress,
+		File:           filepath.Base(file),
+		Mode:           mode.Label,
+		Attributes:     attrs,
+		UpdateProtocol: "POST /live/api/v4/jobs/{id}; POST /live/api/v5/jobs/{id} fallback",
+		Result:         "ERROR",
+	}
+	client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
+	if err != nil {
+		report.Error = err.Error()
+		return report
+	}
+	session, err := client.Login(ctx)
+	if err != nil {
+		report.Error = err.Error()
+		return report
+	}
+	imp, err := client.ImportJobToQueue(ctx, session, file, "hold")
+	report.Import = imp
+	report.JobID = imp.JobID
+	if err != nil {
+		report.Error = err.Error()
+		return report
+	}
+	capture := func(name string) {
+		report.Stages = append(report.Stages, apiTraceStage{Name: name, Captured: time.Now().Format(time.RFC3339Nano), Responses: client.GetRawJobResponses(ctx, session, imp.JobID)})
+	}
+	capture("after import")
+	if _, err := w.waitJobCondition(ctx, client, session, imp.JobID, "done spooling before diagnostic update", 4*time.Minute, time.Second, statusEquals("done spooling")); err != nil {
+		report.Error = err.Error()
+		capture("spooling wait failed")
+		return report
+	}
+	capture("done spooling before update")
+	if err := client.UpdateJobAttributes(ctx, session, imp.JobID, attrs); err != nil {
+		report.Error = err.Error()
+		capture("update failed")
+		return report
+	}
+	capture("immediately after update")
+	if err := w.performModeLifecycle(ctx, client, session, imp.JobID, mode); err != nil {
+		report.Error = err.Error()
+		capture("lifecycle failed")
+		return report
+	}
+	capture("done ripping")
+	final, err := w.readBackAttributes(ctx, client, session, imp.JobID, attrs)
+	report.Final = final
+	if err != nil {
+		report.Error = err.Error()
+		capture("final readback failed")
+		return report
+	}
+	capture("final verification")
+	if attributesMatch(final, attrs) {
+		report.Result = "PASS"
+	} else {
+		report.Result = "FAIL"
+	}
+	return report
+}
+
+func saveAPITrace(report apiTraceReport) (string, error) {
+	dir := captureDirectory()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	body, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "api-trace-"+time.Now().Format("20060102-150405")+".json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func (w *Window) startRun() {
