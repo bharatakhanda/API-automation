@@ -63,6 +63,7 @@ type Window struct {
 	endpoint, workers, maxCases   widget.Editor
 
 	settingsButton, captureButton, runButton, cancelButton widget.Clickable
+	testServerButton                                       widget.Clickable
 	browseFolderButton, browseFileButton                   widget.Clickable
 	navButtons                                             []widget.Clickable
 	allFilesButton, singleFileButton, randomFileButton     widget.Clickable
@@ -75,18 +76,19 @@ type Window struct {
 	strategy      combinations.Strategy
 	runModeIndex  int
 
-	capabilities    capabilities.Model
-	selected        map[string]map[string]*widget.Bool
-	mu              sync.Mutex
-	log             []string
-	results         []resultRow
-	status          string
-	captureActive   bool
-	captureProgress float32
-	capturePhase    string
-	running         atomic.Bool
-	cancel          context.CancelFunc
-	diagnostic      *diagnosticLog
+	capabilities     capabilities.Model
+	selected         map[string]map[string]*widget.Bool
+	mu               sync.Mutex
+	log              []string
+	results          []resultRow
+	status           string
+	serverTestStatus string
+	captureActive    bool
+	captureProgress  float32
+	capturePhase     string
+	running          atomic.Bool
+	cancel           context.CancelFunc
+	diagnostic       *diagnosticLog
 }
 
 type resultRow struct{ File, Method, Status, Duration, Detail string }
@@ -122,6 +124,7 @@ func New() *Window {
 	initEditor(&w.maxCases, "100")
 	w.fileModeGroup.Value = "all"
 	w.runModeGroup.Value = "0"
+	w.serverTestStatus = "Not tested"
 	w.window.Option(app.Title("API Automation"), app.Size(unit.Dp(1240), unit.Dp(900)), app.MinSize(unit.Dp(1100), unit.Dp(760)))
 	return w
 }
@@ -171,6 +174,9 @@ func (w *Window) Run() error {
 }
 
 func (w *Window) handleClicks(gtx layout.Context) {
+	for w.testServerButton.Clicked(gtx) {
+		w.testServerConnection()
+	}
 	for w.captureButton.Clicked(gtx) {
 		w.activePage = 1
 		w.captureCapabilities()
@@ -279,9 +285,18 @@ func (w *Window) content(gtx layout.Context) layout.Dimensions {
 }
 
 func (w *Window) header(gtx layout.Context) layout.Dimensions {
+	title := "Settings"
+	subtitle := "Configure server connection, test files, and Fiery run mode."
+	if w.activePage == 1 {
+		title = "Capabilities"
+		subtitle = "Discover Fiery capabilities and choose job options for automation."
+	} else if w.activePage == 2 {
+		title = "Results & logs"
+		subtitle = "Review automation outcomes, diagnostics, and runtime messages."
+	}
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(label(w.theme, "Server Execution Workspace", 24, palette.text).Layout), layout.Rigid(label(w.theme, "Discover Fiery capabilities, select job options, and run API automation.", 14, palette.muted).Layout))
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(label(w.theme, title, 24, palette.text).Layout), layout.Rigid(label(w.theme, subtitle, 14, palette.muted).Layout))
 		}),
 		layout.Rigid(primaryButton(w.theme, &w.captureButton, "Get server capabilities")), layout.Rigid(spacerX(10)), layout.Rigid(primaryButton(w.theme, &w.runButton, "Run automation")), layout.Rigid(spacerX(10)), layout.Rigid(secondaryButton(w.theme, &w.cancelButton, "Cancel")),
 	)
@@ -290,6 +305,9 @@ func (w *Window) header(gtx layout.Context) layout.Dimensions {
 func (w *Window) settingsCard(gtx layout.Context) layout.Dimensions {
 	return card(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Max.X = minInt(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(900)))
+		w.mu.Lock()
+		serverStatus := w.serverTestStatus
+		w.mu.Unlock()
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return formPanel(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -306,6 +324,10 @@ func (w *Window) settingsCard(gtx layout.Context) layout.Dimensions {
 						}),
 						layout.Rigid(spacer(16)),
 						layout.Rigid(fieldBox(w.theme, "Secret key", "Fiery API access key", &w.secretKey, 794)),
+						layout.Rigid(spacer(18)),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return row(gtx, primaryButton(w.theme, &w.testServerButton, "Test server connection"), statusBadge(w.theme, serverStatus, serverStatusColor(serverStatus)))
+						}),
 					)
 				})
 			}),
@@ -565,6 +587,36 @@ func (w *Window) logPanel(gtx layout.Context) layout.Dimensions {
 	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 	})
+}
+
+func (w *Window) testServerConnection() {
+	server, ok := w.server()
+	if !ok {
+		w.setServerTestStatus("Missing server details")
+		return
+	}
+	w.setServerTestStatus("Testing...")
+	w.setStatus("Testing server connection...")
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
+		if err != nil {
+			w.setServerTestStatus("Connection failed")
+			w.setStatus("Server test failed: " + err.Error())
+			w.addLog("Server connection test failed: %v", err)
+			return
+		}
+		if _, err := client.Login(ctx); err != nil {
+			w.setServerTestStatus("Authentication failed")
+			w.setStatus("Server test failed: " + err.Error())
+			w.addLog("Server connection test failed: %v", err)
+			return
+		}
+		w.setServerTestStatus("Connection OK")
+		w.setStatus("Server connection OK")
+		w.addLog("Server connection test passed for %s", server.IPAddress)
+	}()
 }
 
 func (w *Window) captureCapabilities() {
@@ -1173,6 +1225,15 @@ func (w *Window) setStatus(s string) {
 	w.diagnostic.printf("STATUS: %s", s)
 	w.window.Invalidate()
 }
+
+func (w *Window) setServerTestStatus(s string) {
+	w.mu.Lock()
+	w.serverTestStatus = s
+	w.mu.Unlock()
+	w.diagnostic.printf("SERVER_TEST: %s", s)
+	w.window.Invalidate()
+}
+
 func (w *Window) addLog(format string, args ...any) {
 	line := fmt.Sprintf(format, args...)
 	w.diagnostic.printf("UI: %s", line)
@@ -1271,6 +1332,34 @@ func secondaryButton(th *material.Theme, b *widget.Clickable, text string) layou
 		return btn.Layout(gtx)
 	}
 }
+
+func statusBadge(th *material.Theme, text string, c color.NRGBA) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		return roundedPanel(gtx, unit.Dp(10), 18, withAlpha(c, 0x22), withAlpha(c, 0x55), func(gtx layout.Context) layout.Dimensions {
+			return label(th, text, 14, c).Layout(gtx)
+		})
+	}
+}
+
+func serverStatusColor(status string) color.NRGBA {
+	lower := strings.ToLower(status)
+	switch {
+	case strings.Contains(lower, "ok"):
+		return palette.success
+	case strings.Contains(lower, "failed") || strings.Contains(lower, "missing"):
+		return palette.danger
+	case strings.Contains(lower, "testing"):
+		return palette.primary
+	default:
+		return palette.muted
+	}
+}
+
+func withAlpha(c color.NRGBA, alpha uint8) color.NRGBA {
+	c.A = alpha
+	return c
+}
+
 func toggle(th *material.Theme, b *widget.Clickable, text string, active bool) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		btn := material.Button(th, b, text)
