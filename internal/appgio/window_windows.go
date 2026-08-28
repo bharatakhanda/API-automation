@@ -662,10 +662,18 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		return
 	}
 	w.addLog("Imported %s as job %s into queue %s", filepath.Base(file), imp.JobID, mode.ImportQueue)
+	if err := w.confirmImport(ctx, client, session, imp.JobID); err != nil {
+		w.addResult(file, "GET", "ERR", time.Since(start), err.Error())
+		return
+	}
 	if len(attrs) > 0 {
 		w.addLog("Setting job %s attributes: %s", imp.JobID, formatAttributes(attrs))
 		if err := client.UpdateJobAttributes(ctx, session, imp.JobID, attrs); err != nil {
 			w.addResult(file, "POST", "ERR", time.Since(start), err.Error())
+			return
+		}
+		if err := w.confirmAttributeUpdate(ctx, client, session, imp.JobID, attrs, mode); err != nil {
+			w.addResult(file, "GET", "ERR", time.Since(start), err.Error())
 			return
 		}
 	}
@@ -691,6 +699,32 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		}
 	}
 	w.addResult(file, http.MethodPost, status, time.Since(start), detail)
+}
+
+func (w *Window) confirmImport(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string) error {
+	w.addLog("Confirming job %s is visible after import", jobID)
+	_, err := w.waitJobCondition(ctx, client, session, jobID, "job visible after import", 2*time.Minute, 1*time.Second, func(attrs map[string]string) bool {
+		return strings.TrimSpace(attrs["id"]) == jobID || strings.TrimSpace(attrs["status"]) != "" || strings.TrimSpace(attrs["state"]) != ""
+	})
+	return err
+}
+
+func (w *Window) confirmAttributeUpdate(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, expected map[string]string, mode runMode) error {
+	if len(expected) == 0 {
+		return nil
+	}
+	// Some Fiery command/rerip attributes, especially EFResolution, are only
+	// materialized in the job GET response after RIP completes. Do not fail early
+	// for modes that will RIP; final verification runs after lifecycle actions.
+	if modeIncludesAction(mode, "rip") {
+		w.addLog("Attribute update accepted for job %s; final set/get verification will run after RIP", jobID)
+		return nil
+	}
+	w.addLog("Confirming updated attributes are readable for job %s", jobID)
+	_, err := w.waitJobCondition(ctx, client, session, jobID, "updated attributes readable", 20*time.Second, 1*time.Second, func(attrs map[string]string) bool {
+		return attributesPresent(attrs, expected)
+	})
+	return err
 }
 
 func (w *Window) readBackAttributes(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, expected map[string]string) (map[string]string, error) {
@@ -727,7 +761,7 @@ func (w *Window) performModeLifecycle(ctx context.Context, client *fiery.Client,
 		switch action {
 		case "rip":
 			w.addLog("Waiting for job %s status=done spooling before RIP", jobID)
-			if err := client.WaitJobAttribute(ctx, session, jobID, "status", "done spooling", 4*time.Minute, 2*time.Second); err != nil {
+			if _, err := w.waitJobCondition(ctx, client, session, jobID, "done spooling before RIP", 4*time.Minute, 2*time.Second, statusEquals("done spooling")); err != nil {
 				return err
 			}
 			w.addLog("Running RIP for job %s", jobID)
@@ -735,16 +769,20 @@ func (w *Window) performModeLifecycle(ctx context.Context, client *fiery.Client,
 				return err
 			}
 			w.addLog("Waiting for job %s status=done ripping after RIP", jobID)
-			if err := client.WaitJobAttribute(ctx, session, jobID, "status", "done ripping", 6*time.Minute, 2*time.Second); err != nil {
+			if _, err := w.waitJobCondition(ctx, client, session, jobID, "done ripping after RIP", 6*time.Minute, 2*time.Second, statusEquals("done ripping")); err != nil {
 				return err
 			}
 		case "production":
 			w.addLog("Waiting for job %s status=done ripping before Ready to Print", jobID)
-			if err := client.WaitJobAttribute(ctx, session, jobID, "status", "done ripping", 6*time.Minute, 2*time.Second); err != nil {
+			if _, err := w.waitJobCondition(ctx, client, session, jobID, "done ripping before production", 6*time.Minute, 2*time.Second, statusEquals("done ripping")); err != nil {
 				return err
 			}
 			w.addLog("Moving job %s to production release state", jobID)
 			if err := client.UpdateJobAttributes(ctx, session, jobID, map[string]string{"job release state": "production"}); err != nil {
+				return err
+			}
+			w.addLog("Waiting for job %s job release state=production", jobID)
+			if _, err := w.waitJobCondition(ctx, client, session, jobID, "production release state", 2*time.Minute, 2*time.Second, attrEquals("job release state", "production")); err != nil {
 				return err
 			}
 		case "press_print":
@@ -752,15 +790,92 @@ func (w *Window) performModeLifecycle(ctx context.Context, client *fiery.Client,
 			if err := client.JobAction(ctx, session, jobID, "press_print"); err != nil {
 				return err
 			}
+			w.addLog("Confirming press_print accepted for job %s", jobID)
+			if _, err := w.waitJobCondition(ctx, client, session, jobID, "press_print accepted", 2*time.Minute, 2*time.Second, pressPrintAccepted); err != nil {
+				return err
+			}
 		case "print":
-			time.Sleep(500 * time.Millisecond)
 			w.addLog("Running print for job %s", jobID)
 			if err := client.JobAction(ctx, session, jobID, "print"); err != nil {
+				return err
+			}
+			w.addLog("Waiting for job %s print completion", jobID)
+			if _, err := w.waitJobCondition(ctx, client, session, jobID, "print completion", 10*time.Minute, 3*time.Second, printCompleted); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func (w *Window) waitJobCondition(ctx context.Context, client *fiery.Client, session fiery.Session, jobID, description string, timeout, interval time.Duration, match func(map[string]string) bool) (map[string]string, error) {
+	if timeout <= 0 {
+		timeout = 2 * time.Minute
+	}
+	if interval <= 0 {
+		interval = time.Second
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	var last map[string]string
+	var lastErr error
+	for {
+		attrs, err := client.GetJobAttributes(ctx, session, jobID)
+		if err == nil {
+			last = attrs
+			if match(attrs) {
+				return attrs, nil
+			}
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			return last, ctx.Err()
+		case <-deadline.C:
+			if lastErr != nil {
+				return last, fmt.Errorf("wait for job %s %s timed out after %s; last GET error: %w", jobID, description, timeout, lastErr)
+			}
+			return last, fmt.Errorf("wait for job %s %s timed out after %s; last status=%q state=%q release=%q recent=%q keys=%s", jobID, description, timeout, last["status"], last["state"], last["job release state"], last["recent action"], short(strings.Join(sortedKeys(last), ","), 220))
+		case <-ticker.C:
+		}
+	}
+}
+
+func statusEquals(want string) func(map[string]string) bool {
+	return func(attrs map[string]string) bool { return strings.EqualFold(strings.TrimSpace(attrs["status"]), want) }
+}
+
+func attrEquals(key, want string) func(map[string]string) bool {
+	return func(attrs map[string]string) bool { return strings.EqualFold(strings.TrimSpace(attrs[key]), want) }
+}
+
+func pressPrintAccepted(attrs map[string]string) bool {
+	if strings.EqualFold(attrs["queued for printing?"], "yes") || strings.EqualFold(attrs["is committed to print?"], "yes") || strings.EqualFold(attrs["is printing?"], "yes") {
+		return true
+	}
+	status := strings.ToLower(strings.TrimSpace(attrs["status"]))
+	recent := strings.ToLower(strings.TrimSpace(attrs["recent action"]))
+	return strings.Contains(status, "print") || strings.Contains(recent, "press_print") || strings.Contains(recent, "press print")
+}
+
+func printCompleted(attrs map[string]string) bool {
+	if strings.EqualFold(attrs["has been printed?"], "yes") || strings.EqualFold(attrs["status"], "done printing") || strings.EqualFold(attrs["display status"], "done printing") {
+		return true
+	}
+	status := strings.ToLower(strings.TrimSpace(attrs["status"]))
+	return strings.Contains(status, "done print") || strings.Contains(status, "printed")
+}
+
+func modeIncludesAction(mode runMode, want string) bool {
+	for _, action := range mode.Actions {
+		if action == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *Window) server() (model.ServerConnection, bool) {
