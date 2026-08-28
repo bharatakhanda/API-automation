@@ -61,6 +61,15 @@ type ImportResult struct {
 	RawBody    string
 }
 
+// JobRawResponse captures the exact response from a single Fiery job GET so it
+// can be compared directly with the same request in tools such as Postman.
+type JobRawResponse struct {
+	Method     string
+	Endpoint   string
+	StatusCode int
+	Body       string
+}
+
 func New(cfg Config) (*Client, error) {
 	cfg.ServerIP = strings.TrimSpace(cfg.ServerIP)
 	cfg.SecretKey = strings.TrimSpace(cfg.SecretKey)
@@ -148,7 +157,11 @@ func (c *Client) login(ctx context.Context, apiPath string) (Session, error) {
 	if len(cookies) == 0 {
 		return Session{}, errors.New("login succeeded but no session cookie was returned")
 	}
-	return Session{Cookie: cookies[0].String()}, nil
+	cookiePairs := make([]string, 0, len(cookies))
+	for _, cookie := range cookies {
+		cookiePairs = append(cookiePairs, cookie.Name+"="+cookie.Value)
+	}
+	return Session{Cookie: strings.Join(cookiePairs, "; ")}, nil
 }
 
 func (c *Client) KeepAlive(ctx context.Context, session Session) error {
@@ -261,6 +274,44 @@ func (c *Client) GetJobAttributes(ctx context.Context, session Session, jobID st
 	return merged, nil
 }
 
+// GetRawJobResponses performs the exact base job GET for v5 and v4 without
+// flattening or merging either response.
+func (c *Client) GetRawJobResponses(ctx context.Context, session Session, jobID string) []JobRawResponse {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return []JobRawResponse{{Method: http.MethodGet, Endpoint: "", StatusCode: 0, Body: "job ID is required"}}
+	}
+	responses := make([]JobRawResponse, 0, 2)
+	for _, apiPath := range []string{apiV5, apiV4} {
+		endpoint := c.baseURL + apiPath + "/jobs/" + url.PathEscape(jobID)
+		result := JobRawResponse{Method: http.MethodGet, Endpoint: endpoint}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			result.Body = err.Error()
+			responses = append(responses, result)
+			continue
+		}
+		req.Header.Set("Cookie", session.Cookie)
+		req.Header.Set("Accept", "application/json")
+		resp, err := c.http.Do(req)
+		if err != nil {
+			result.Body = err.Error()
+			responses = append(responses, result)
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+		_ = resp.Body.Close()
+		result.StatusCode = resp.StatusCode
+		if readErr != nil {
+			result.Body = readErr.Error()
+		} else {
+			result.Body = string(body)
+		}
+		responses = append(responses, result)
+	}
+	return responses
+}
+
 func (c *Client) getJobAttributesAt(ctx context.Context, session Session, apiPath, jobID, suffix string) (map[string]string, error) {
 	endpoint := c.baseURL + apiPath + "/jobs/" + url.PathEscape(jobID) + suffix
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -286,24 +337,14 @@ func (c *Client) getJobAttributesAt(ctx context.Context, session Session, apiPat
 }
 
 func (c *Client) UpdateJobAttributes(ctx context.Context, session Session, jobID string, attributes map[string]string) error {
-	attempts := []struct {
-		apiPath string
-		method  string
-	}{
-		{apiV5, http.MethodPut},
-		{apiV5, http.MethodPost},
-		{apiV4, http.MethodPut},
-		{apiV4, http.MethodPost},
+	// EFI's supplied update examples use POST against v4. Keep that known-good
+	// operation primary, with the equivalent v5 POST as compatibility fallback.
+	if err := c.updateJobAttributes(ctx, session, apiV4, http.MethodPost, jobID, attributes); err == nil {
+		return nil
+	} else if fallbackErr := c.updateJobAttributes(ctx, session, apiV5, http.MethodPost, jobID, attributes); fallbackErr != nil {
+		return fmt.Errorf("v4 POST job attribute update failed: %w; v5 POST fallback failed: %w", err, fallbackErr)
 	}
-	var failures []string
-	for _, attempt := range attempts {
-		if err := c.updateJobAttributes(ctx, session, attempt.apiPath, attempt.method, jobID, attributes); err == nil {
-			return nil
-		} else {
-			failures = append(failures, fmt.Sprintf("%s %s: %v", attempt.method, attempt.apiPath, err))
-		}
-	}
-	return fmt.Errorf("job attribute update failed after all attempts: %s", strings.Join(failures, "; "))
+	return nil
 }
 
 func (c *Client) updateJobAttributes(ctx context.Context, session Session, apiPath, method, jobID string, attributes map[string]string) error {
@@ -424,23 +465,27 @@ func extractJobAttributes(body []byte) map[string]string {
 }
 
 func collectJobAttributes(out map[string]string, item map[string]any) {
-	collectAttributeTree(out, item)
+	// Preserve direct data.item fields exactly as Postman displays them. Nested
+	// metadata may contain duplicate generic names and must never overwrite a
+	// top-level job-ticket value such as EFResolution.
+	for key, raw := range item {
+		if scalarAttribute(raw) || wrappedAttributeValue(raw) {
+			out[key] = normalizeAttributeValue(raw)
+		}
+	}
+	for _, raw := range item {
+		collectAttributeTree(out, raw)
+	}
 }
 
 func collectAttributeTree(out map[string]string, value any) {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, raw := range typed {
-			if key == "job" || key == "attributes" {
-				collectAttributeTree(out, raw)
-				continue
-			}
-			if scalarAttribute(raw) {
-				out[key] = normalizeAttributeValue(raw)
-				continue
-			}
-			if wrappedAttributeValue(raw) {
-				out[key] = normalizeAttributeValue(raw)
+			if scalarAttribute(raw) || wrappedAttributeValue(raw) {
+				if existing, found := out[key]; !found || existing == "" {
+					out[key] = normalizeAttributeValue(raw)
+				}
 				continue
 			}
 			collectAttributeTree(out, raw)

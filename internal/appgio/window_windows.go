@@ -832,7 +832,15 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		return
 	}
 	if len(attrs) > 0 {
-		w.addLog("Setting job %s attributes: %s", imp.JobID, formatAttributes(attrs))
+		// Wait for the imported ticket to finish spooling before changing it.
+		// Command/rerip attributes can otherwise be accepted and subsequently
+		// overwritten when Fiery finishes constructing the job ticket.
+		w.addLog("Waiting for job %s status=done spooling before setting attributes", imp.JobID)
+		if _, err := w.waitJobCondition(ctx, client, session, imp.JobID, "done spooling before attribute update", 4*time.Minute, time.Second, statusEquals("done spooling")); err != nil {
+			w.addResult(file, "GET", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
+			return
+		}
+		w.addLog("Setting job %s attributes after done spooling: %s", imp.JobID, formatAttributes(attrs))
 		if err := client.UpdateJobAttributes(ctx, session, imp.JobID, attrs); err != nil {
 			w.addResult(file, "POST", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
 			return
@@ -863,6 +871,7 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 			if requiresRipReadback(k) && !modeIncludesAction(mode, "rip") {
 				detail += "; note=this attribute is typically readable only after RIP, select RIP or Process and Hold for strict verification"
 			}
+			w.logRawPostmanComparison(ctx, client, session, imp.JobID)
 			break
 		}
 	}
@@ -954,6 +963,12 @@ func (w *Window) logAttributeReadback(jobID string, got, expected map[string]str
 		return
 	}
 	w.diagnostic.printf("READBACK: %s", string(encoded))
+}
+
+func (w *Window) logRawPostmanComparison(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string) {
+	for _, response := range client.GetRawJobResponses(ctx, session, jobID) {
+		w.diagnostic.printf("POSTMAN_COMPARE: method=%s endpoint=%s status=%d accept=application/json body=%s", response.Method, response.Endpoint, response.StatusCode, response.Body)
+	}
 }
 
 func attributesPresent(got, expected map[string]string) bool {

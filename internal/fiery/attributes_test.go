@@ -34,3 +34,11 @@ func TestExtractJobAttributesFromItemsShape(t *testing.T) {
 		t.Fatalf("EFColorMode = %q", attrs["EFColorMode"])
 	}
 }
+
+func TestExtractJobAttributesPreservesTopLevelValue(t *testing.T) {
+	body := []byte(`{"data":{"item":{"id":"JOB-1","EFResolution":"360x720dpi","metadata":{"EFResolution":""},"attributes":{"EFResolution":"360x360dpi"}}}}`)
+	attrs := extractJobAttributes(body)
+	if attrs["EFResolution"] != "360x720dpi" {
+		t.Fatalf("EFResolution = %q, want top-level value", attrs["EFResolution"])
+	}
+}
