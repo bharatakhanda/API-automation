@@ -69,6 +69,7 @@ type Window struct {
 	allFilesButton, singleFileButton, randomFileButton     widget.Clickable
 	selectedOnlyButton, allPermButton, pairwiseButton      widget.Clickable
 	modeButtons                                            []widget.Clickable
+	modeChecks                                             []widget.Bool
 	fileModeGroup, runModeGroup                            widget.Enum
 
 	activePage    int
@@ -124,6 +125,10 @@ func New() *Window {
 	initEditor(&w.maxCases, "100")
 	w.fileModeGroup.Value = "all"
 	w.runModeGroup.Value = "0"
+	w.modeChecks = make([]widget.Bool, len(runModes))
+	if len(w.modeChecks) > 0 {
+		w.modeChecks[0].Value = true
+	}
 	w.serverTestStatus = "Not tested"
 	w.window.Option(app.Title("API Automation"), app.Size(unit.Dp(1240), unit.Dp(900)), app.MinSize(unit.Dp(1100), unit.Dp(760)))
 	return w
@@ -231,11 +236,6 @@ func (w *Window) handleClicks(gtx layout.Context) {
 	}
 	for w.pairwiseButton.Clicked(gtx) {
 		w.strategy = combinations.StrategyPairwise
-	}
-	for i := range w.modeButtons {
-		for w.modeButtons[i].Clicked(gtx) {
-			w.runModeIndex = i
-		}
 	}
 }
 
@@ -393,11 +393,32 @@ func (w *Window) fileSelectionRadioGroup(gtx layout.Context) layout.Dimensions {
 }
 
 func (w *Window) runModeRadioGroup(gtx layout.Context) layout.Dimensions {
-	options := make([]radioOption, 0, len(runModes))
-	for i, mode := range runModes {
-		options = append(options, radioOption{Key: strconv.Itoa(i), Label: mode.Label})
+	if len(w.modeChecks) != len(runModes) {
+		w.modeChecks = make([]widget.Bool, len(runModes))
+		if len(w.modeChecks) > 0 {
+			w.modeChecks[0].Value = true
+		}
 	}
-	return radioGroup(gtx, w.theme, "Run mode", "Select one Fiery lifecycle workflow.", options, &w.runModeGroup)
+	children := []layout.FlexChild{
+		layout.Rigid(label(w.theme, "Run modes", 16, palette.text).Layout),
+		layout.Rigid(spacer(4)),
+		layout.Rigid(label(w.theme, "Select one or more Fiery workflows to execute.", 13, palette.muted).Layout),
+		layout.Rigid(spacer(10)),
+	}
+	for i := range runModes {
+		idx := i
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				check := material.CheckBox(w.theme, &w.modeChecks[idx], runModes[idx].Label)
+				check.Color = palette.text
+				check.IconColor = palette.primary
+				return check.Layout(gtx)
+			})
+		}))
+	}
+	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	})
 }
 
 type radioOption struct{ Key, Label string }
@@ -724,7 +745,12 @@ func (w *Window) startRun() {
 	}
 	combos := w.selectedCombinations()
 	w.logSelectedCombinations(combos)
-	mode := runModes[w.currentRunModeIndex()]
+	modes := w.selectedRunModes()
+	if len(modes) == 0 {
+		w.setStatus("Select at least one run mode.")
+		return
+	}
+	w.addLog("Selected run modes: %s", formatRunModes(modes))
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
 	w.running.Store(true)
@@ -732,10 +758,10 @@ func (w *Window) startRun() {
 	w.results = nil
 	w.mu.Unlock()
 	w.setStatus("Running automation...")
-	go w.runAutomation(ctx, server, selectedFiles, workers, combos, mode)
+	go w.runAutomation(ctx, server, selectedFiles, workers, combos, modes)
 }
 
-func (w *Window) runAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, combos []combinations.Combination, mode runMode) {
+func (w *Window) runAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, combos []combinations.Combination, modes []runMode) {
 	defer func() {
 		w.running.Store(false)
 		w.window.Invalidate()
@@ -753,6 +779,7 @@ func (w *Window) runAutomation(ctx context.Context, server model.ServerConnectio
 	jobs := make(chan struct {
 		file  string
 		attrs map[string]string
+		mode  runMode
 	})
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
@@ -760,22 +787,25 @@ func (w *Window) runAutomation(ctx context.Context, server model.ServerConnectio
 		go func() {
 			defer wg.Done()
 			for job := range jobs {
-				w.executeJob(ctx, client, session, job.file, job.attrs, mode)
+				w.executeJob(ctx, client, session, job.file, job.attrs, job.mode)
 			}
 		}()
 	}
 	for _, f := range selectedFiles {
 		for _, c := range combos {
-			select {
-			case <-ctx.Done():
-				close(jobs)
-				wg.Wait()
-				w.setStatus("Cancelled")
-				return
-			case jobs <- struct {
-				file  string
-				attrs map[string]string
-			}{f, combinationToAttributes(c)}:
+			for _, mode := range modes {
+				select {
+				case <-ctx.Done():
+					close(jobs)
+					wg.Wait()
+					w.setStatus("Cancelled")
+					return
+				case jobs <- struct {
+					file  string
+					attrs map[string]string
+					mode  runMode
+				}{f, combinationToAttributes(c), mode}:
+				}
 			}
 		}
 	}
@@ -788,43 +818,43 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 	start := time.Now()
 	imp, err := client.ImportJobToQueue(ctx, session, file, mode.ImportQueue)
 	if err != nil {
-		w.addResult(file, "POST", "ERR", time.Since(start), err.Error())
+		w.addResult(file, "POST", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
 		return
 	}
-	w.addLog("Imported %s as job %s into queue %s", filepath.Base(file), imp.JobID, mode.ImportQueue)
+	w.addLog("Imported %s as job %s into queue %s for mode %s", filepath.Base(file), imp.JobID, mode.ImportQueue, mode.Label)
 	if err := w.confirmImport(ctx, client, session, imp.JobID); err != nil {
-		w.addResult(file, "GET", "ERR", time.Since(start), err.Error())
+		w.addResult(file, "GET", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
 		return
 	}
 	if len(attrs) > 0 {
 		w.addLog("Setting job %s attributes: %s", imp.JobID, formatAttributes(attrs))
 		if err := client.UpdateJobAttributes(ctx, session, imp.JobID, attrs); err != nil {
-			w.addResult(file, "POST", "ERR", time.Since(start), err.Error())
+			w.addResult(file, "POST", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
 			return
 		}
 		if err := w.confirmAttributeUpdate(ctx, client, session, imp.JobID, attrs, mode); err != nil {
-			w.addResult(file, "GET", "ERR", time.Since(start), err.Error())
+			w.addResult(file, "GET", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
 			return
 		}
 	}
 	if err := w.performModeLifecycle(ctx, client, session, imp.JobID, mode); err != nil {
-		w.addResult(file, "POST", "ERR", time.Since(start), err.Error())
+		w.addResult(file, "POST", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
 		return
 	}
 	got, err := w.readBackAttributes(ctx, client, session, imp.JobID, attrs)
 	if err != nil {
-		w.addResult(file, "GET", "ERR", time.Since(start), err.Error())
+		w.addResult(file, "GET", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
 		return
 	}
 	status := "PASS"
-	detail := "set values matched get values"
+	detail := fmt.Sprintf("mode=%s: set values matched get values", mode.Label)
 	if len(attrs) == 0 {
-		detail = "import/lifecycle completed; no job attributes were selected for set/get verification"
+		detail = fmt.Sprintf("mode=%s: import/lifecycle completed; no job attributes were selected for set/get verification", mode.Label)
 	}
 	for k, v := range attrs {
 		if got[k] != v {
 			status = "FAIL"
-			detail = fmt.Sprintf("%s set=%q got=%q availableKeys=%s", k, v, got[k], short(strings.Join(sortedKeys(got), ","), 220))
+			detail = fmt.Sprintf("mode=%s: %s set=%q got=%q availableKeys=%s", mode.Label, k, v, got[k], short(strings.Join(sortedKeys(got), ","), 220))
 			break
 		}
 	}
@@ -1038,6 +1068,28 @@ func (w *Window) currentRunModeIndex() int {
 	w.runModeIndex = idx
 	return idx
 }
+
+func (w *Window) selectedRunModes() []runMode {
+	if len(w.modeChecks) != len(runModes) {
+		return []runMode{runModes[0]}
+	}
+	modes := make([]runMode, 0, len(runModes))
+	for i := range runModes {
+		if w.modeChecks[i].Value {
+			modes = append(modes, runModes[i])
+		}
+	}
+	return modes
+}
+
+func formatRunModes(modes []runMode) string {
+	labels := make([]string, 0, len(modes))
+	for _, mode := range modes {
+		labels = append(labels, mode.Label)
+	}
+	return strings.Join(labels, ", ")
+}
+
 func (w *Window) selectedCombinations() []combinations.Combination {
 	w.mu.Lock()
 	model := w.capabilities
