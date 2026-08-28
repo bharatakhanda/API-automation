@@ -39,13 +39,13 @@ import (
 var palette = struct {
 	bg, surface, surfaceAlt, navy, text, muted, border, primary, primaryDim, danger, success color.NRGBA
 }{
-	bg:         rgb(0xf5f7fb),
+	bg:         rgb(0xf3f6fb),
 	surface:    rgb(0xffffff),
-	surfaceAlt: rgb(0xf8fafc),
+	surfaceAlt: rgb(0xf6f8fc),
 	navy:       rgb(0x0f172a),
 	text:       rgb(0x172033),
 	muted:      rgb(0x64748b),
-	border:     rgb(0xdce3ed),
+	border:     rgb(0xdbe4f0),
 	primary:    rgb(0x2563eb),
 	primaryDim: rgb(0xdbeafe),
 	danger:     rgb(0xb91c1c),
@@ -289,37 +289,52 @@ func (w *Window) header(gtx layout.Context) layout.Dimensions {
 
 func (w *Window) settingsCard(gtx layout.Context) layout.Dimensions {
 	return card(gtx, func(gtx layout.Context) layout.Dimensions {
-		gtx.Constraints.Max.X = minInt(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(860)))
+		gtx.Constraints.Max.X = minInt(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(900)))
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(label(w.theme, "Server connection", 24, palette.text).Layout),
-			layout.Rigid(spacer(6)),
-			layout.Rigid(label(w.theme, "Enter the Fiery server details used for discovery and automation.", 14, palette.muted).Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return formPanel(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(label(w.theme, "Server connection", 24, palette.text).Layout),
+						layout.Rigid(spacer(6)),
+						layout.Rigid(label(w.theme, "Enter the Fiery server details used for discovery and automation.", 14, palette.muted).Layout),
+						layout.Rigid(spacer(22)),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return row(gtx,
+								fieldBox(w.theme, "Server IP address", "Example: 10.220.129.85", &w.serverIP, 390),
+								fieldBox(w.theme, "Admin password", "Administrator password", &w.password, 390),
+							)
+						}),
+						layout.Rigid(spacer(16)),
+						layout.Rigid(fieldBox(w.theme, "Secret key", "Fiery API access key", &w.secretKey, 794)),
+					)
+				})
+			}),
 			layout.Rigid(spacer(22)),
-			layout.Rigid(serverConnectionField(w.theme, "Server IP address", "Example: 10.220.129.85", &w.serverIP)),
-			layout.Rigid(spacer(16)),
-			layout.Rigid(serverConnectionField(w.theme, "Secret key", "Fiery API access key", &w.secretKey)),
-			layout.Rigid(spacer(16)),
-			layout.Rigid(serverConnectionField(w.theme, "Admin password", "Administrator password", &w.password)),
-			layout.Rigid(spacer(34)),
-			layout.Rigid(label(w.theme, "Test File Setup", 24, palette.text).Layout),
-			layout.Rigid(spacer(6)),
-			layout.Rigid(label(w.theme, "Choose the PDF/job files to import during automation.", 14, palette.muted).Layout),
-			layout.Rigid(spacer(22)),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return row(gtx, flexField(w.theme, "Folder path", "Folder containing test files", &w.folderPath), secondaryButton(w.theme, &w.browseFolderButton, "Browse folder"))
+				return formPanel(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(label(w.theme, "Test File Setup", 24, palette.text).Layout),
+						layout.Rigid(spacer(6)),
+						layout.Rigid(label(w.theme, "Choose the PDF/job files to import during automation.", 14, palette.muted).Layout),
+						layout.Rigid(spacer(22)),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return row(gtx, fieldBox(w.theme, "Folder path", "Folder containing test files", &w.folderPath, 640), secondaryButton(w.theme, &w.browseFolderButton, "Browse folder"))
+						}),
+						layout.Rigid(spacer(16)),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return row(gtx, fieldBox(w.theme, "Specific file path", "Optional single PDF/job file", &w.filePath, 640), secondaryButton(w.theme, &w.browseFileButton, "Browse file"))
+						}),
+						layout.Rigid(spacer(18)),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return row(gtx, fieldBox(w.theme, "Parallel jobs", "1", &w.workers, 150), fieldBox(w.theme, "Endpoint", "/live/api/v5/jobs", &w.endpoint, 360))
+						}),
+						layout.Rigid(spacer(22)),
+						layout.Rigid(w.fileSelectionRadioGroup),
+						layout.Rigid(spacer(18)),
+						layout.Rigid(w.runModeRadioGroup),
+					)
+				})
 			}),
-			layout.Rigid(spacer(16)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return row(gtx, flexField(w.theme, "Specific file path", "Optional single PDF/job file", &w.filePath), secondaryButton(w.theme, &w.browseFileButton, "Browse file"))
-			}),
-			layout.Rigid(spacer(18)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return row(gtx, field(w.theme, "Parallel jobs", &w.workers, 120), field(w.theme, "Endpoint", &w.endpoint, 300))
-			}),
-			layout.Rigid(spacer(24)),
-			layout.Rigid(w.fileSelectionRadioGroup),
-			layout.Rigid(spacer(24)),
-			layout.Rigid(w.runModeRadioGroup),
 		)
 	})
 }
@@ -1185,6 +1200,13 @@ func surfaceAlt(gtx layout.Context, child layout.Widget) layout.Dimensions {
 		return child(gtx)
 	})
 }
+
+func formPanel(gtx layout.Context, child layout.Widget) layout.Dimensions {
+	return layout.UniformInset(unit.Dp(18)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		paint.FillShape(gtx.Ops, palette.surfaceAlt, clip.RRect{Rect: image.Rectangle{Max: gtx.Constraints.Max}, SE: 14, SW: 14, NE: 14, NW: 14}.Op(gtx.Ops))
+		return child(gtx)
+	})
+}
 func label(th *material.Theme, text string, size unit.Sp, c color.NRGBA) material.LabelStyle {
 	l := material.Label(th, size, text)
 	l.Color = c
@@ -1200,15 +1222,12 @@ func field(th *material.Theme, title string, ed *widget.Editor, width int) layou
 	}
 }
 
-func flexField(th *material.Theme, title, hint string, ed *widget.Editor) layout.Widget {
+func fieldBox(th *material.Theme, title, hint string, ed *widget.Editor, width int) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		gtx.Constraints.Min.X = minInt(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(560)))
-		return serverConnectionField(th, title, hint, ed)(gtx)
-	}
-}
-
-func serverConnectionField(th *material.Theme, title, hint string, ed *widget.Editor) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
+		if width > 0 {
+			w := minInt(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(width)))
+			gtx.Constraints.Min.X, gtx.Constraints.Max.X = w, w
+		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(label(th, title, 14, palette.text).Layout),
 			layout.Rigid(spacer(8)),
@@ -1216,7 +1235,7 @@ func serverConnectionField(th *material.Theme, title, hint string, ed *widget.Ed
 				gtx.Constraints.Min.X = gtx.Constraints.Max.X
 				gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(52))
 				rr := clip.UniformRRect(image.Rectangle{Max: gtx.Constraints.Min}, gtx.Dp(unit.Dp(10)))
-				paint.FillShape(gtx.Ops, rgb(0xf8fafc), rr.Op(gtx.Ops))
+				paint.FillShape(gtx.Ops, rgb(0xffffff), rr.Op(gtx.Ops))
 				paint.FillShape(gtx.Ops, palette.border, clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(gtx.Dp(unit.Dp(1)))}.Op())
 				return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(14), Bottom: unit.Dp(8), Left: unit.Dp(14)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					editor := material.Editor(th, ed, hint)
