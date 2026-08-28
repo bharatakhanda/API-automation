@@ -1189,29 +1189,25 @@ func (w *Window) addResult(file, method, status string, d time.Duration, detail 
 }
 
 func card(gtx layout.Context, child layout.Widget) layout.Dimensions {
-	return layout.UniformInset(unit.Dp(18)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		rr := clip.RRect{Rect: image.Rectangle{Max: gtx.Constraints.Max}, SE: 16, SW: 16, NE: 16, NW: 16}
-		paint.FillShape(gtx.Ops, palette.surface, rr.Op(gtx.Ops))
-		paint.FillShape(gtx.Ops, rgb(0xd8e2ef), clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(gtx.Dp(unit.Dp(1)))}.Op())
-		return child(gtx)
-	})
+	return roundedPanel(gtx, unit.Dp(18), 16, palette.surface, rgb(0xd8e2ef), child)
 }
 func surfaceAlt(gtx layout.Context, child layout.Widget) layout.Dimensions {
-	return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		rr := clip.RRect{Rect: image.Rectangle{Max: gtx.Constraints.Max}, SE: 10, SW: 10, NE: 10, NW: 10}
-		paint.FillShape(gtx.Ops, palette.surfaceAlt, rr.Op(gtx.Ops))
-		paint.FillShape(gtx.Ops, rgb(0xd8e2ef), clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(gtx.Dp(unit.Dp(1)))}.Op())
-		return child(gtx)
-	})
+	return roundedPanel(gtx, unit.Dp(12), 10, palette.surfaceAlt, rgb(0xd8e2ef), child)
 }
 
 func formPanel(gtx layout.Context, child layout.Widget) layout.Dimensions {
-	return layout.UniformInset(unit.Dp(20)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		rr := clip.RRect{Rect: image.Rectangle{Max: gtx.Constraints.Max}, SE: 16, SW: 16, NE: 16, NW: 16}
-		paint.FillShape(gtx.Ops, palette.surfaceAlt, rr.Op(gtx.Ops))
-		paint.FillShape(gtx.Ops, rgb(0xd8e2ef), clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(gtx.Dp(unit.Dp(1)))}.Op())
-		return child(gtx)
-	})
+	return roundedPanel(gtx, unit.Dp(20), 16, palette.surfaceAlt, rgb(0xd8e2ef), child)
+}
+
+func roundedPanel(gtx layout.Context, inset unit.Dp, radius int, fill, border color.NRGBA, child layout.Widget) layout.Dimensions {
+	macro := op.Record(gtx.Ops)
+	dims := layout.UniformInset(inset).Layout(gtx, child)
+	call := macro.Stop()
+	rr := clip.RRect{Rect: image.Rectangle{Max: dims.Size}, SE: radius, SW: radius, NE: radius, NW: radius}
+	paint.FillShape(gtx.Ops, fill, rr.Op(gtx.Ops))
+	paint.FillShape(gtx.Ops, border, clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(gtx.Dp(unit.Dp(1)))}.Op())
+	call.Add(gtx.Ops)
+	return dims
 }
 func label(th *material.Theme, text string, size unit.Sp, c color.NRGBA) material.LabelStyle {
 	l := material.Label(th, size, text)
