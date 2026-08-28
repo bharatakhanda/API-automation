@@ -286,15 +286,27 @@ func (c *Client) getJobAttributesAt(ctx context.Context, session Session, apiPat
 }
 
 func (c *Client) UpdateJobAttributes(ctx context.Context, session Session, jobID string, attributes map[string]string) error {
-	if err := c.updateJobAttributes(ctx, session, apiV5, jobID, attributes); err == nil {
-		return nil
-	} else if fallbackErr := c.updateJobAttributes(ctx, session, apiV4, jobID, attributes); fallbackErr != nil {
-		return fmt.Errorf("v5 job attribute update failed: %w; v4 job attribute update failed: %w", err, fallbackErr)
+	attempts := []struct {
+		apiPath string
+		method  string
+	}{
+		{apiV5, http.MethodPut},
+		{apiV5, http.MethodPost},
+		{apiV4, http.MethodPut},
+		{apiV4, http.MethodPost},
 	}
-	return nil
+	var failures []string
+	for _, attempt := range attempts {
+		if err := c.updateJobAttributes(ctx, session, attempt.apiPath, attempt.method, jobID, attributes); err == nil {
+			return nil
+		} else {
+			failures = append(failures, fmt.Sprintf("%s %s: %v", attempt.method, attempt.apiPath, err))
+		}
+	}
+	return fmt.Errorf("job attribute update failed after all attempts: %s", strings.Join(failures, "; "))
 }
 
-func (c *Client) updateJobAttributes(ctx context.Context, session Session, apiPath, jobID string, attributes map[string]string) error {
+func (c *Client) updateJobAttributes(ctx context.Context, session Session, apiPath, method, jobID string, attributes map[string]string) error {
 	jobID = strings.TrimSpace(jobID)
 	if jobID == "" {
 		return errors.New("job ID is required")
@@ -306,7 +318,7 @@ func (c *Client) updateJobAttributes(ctx context.Context, session Session, apiPa
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+apiPath+"/jobs/"+url.PathEscape(jobID), bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+apiPath+"/jobs/"+url.PathEscape(jobID), bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -320,7 +332,7 @@ func (c *Client) updateJobAttributes(ctx context.Context, session Session, apiPa
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("job attribute update %s/jobs/%s failed with HTTP %d: %s", apiPath, jobID, resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("job attribute update %s %s/jobs/%s failed with HTTP %d: %s", method, apiPath, jobID, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
 }

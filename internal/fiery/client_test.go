@@ -74,7 +74,7 @@ func TestLoginAndImportJob(t *testing.T) {
 		case apiV4 + "/jobs/JOB-123/attributes", apiV5 + "/jobs/JOB-123/attributes", apiV4 + "/jobs/JOB-123/properties", apiV5 + "/jobs/JOB-123/properties":
 			http.NotFound(w, r)
 		case apiV4 + "/jobs/JOB-123", apiV5 + "/jobs/JOB-123":
-			if r.Method == http.MethodPost {
+			if r.Method == http.MethodPut || r.Method == http.MethodPost {
 				sawUpdate = true
 				_, _ = w.Write([]byte(`{"ok":true}`))
 				return
