@@ -315,7 +315,7 @@ func (w *Window) settingsCard(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 						layout.Rigid(label(w.theme, "Test File Setup", 24, palette.text).Layout),
 						layout.Rigid(spacer(6)),
-						layout.Rigid(label(w.theme, "Choose the PDF/job files to import during automation.", 14, palette.muted).Layout),
+						layout.Rigid(label(w.theme, "Choose the files to import during automation.", 14, palette.muted).Layout),
 						layout.Rigid(spacer(22)),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return row(gtx, fieldBox(w.theme, "Folder path", "Folder containing test files", &w.folderPath, 640), secondaryButton(w.theme, &w.browseFolderButton, "Browse folder"))
@@ -326,7 +326,7 @@ func (w *Window) settingsCard(gtx layout.Context) layout.Dimensions {
 						}),
 						layout.Rigid(spacer(18)),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return row(gtx, fieldBox(w.theme, "Parallel jobs", "1", &w.workers, 150), fieldBox(w.theme, "Endpoint", "/live/api/v5/jobs", &w.endpoint, 360))
+							return row(gtx, fieldBox(w.theme, "Parallel jobs", "1", &w.workers, 150))
 						}),
 						layout.Rigid(spacer(22)),
 						layout.Rigid(w.fileSelectionRadioGroup),
