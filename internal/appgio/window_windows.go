@@ -68,6 +68,7 @@ type Window struct {
 	allFilesButton, singleFileButton, randomFileButton     widget.Clickable
 	selectedOnlyButton, allPermButton, pairwiseButton      widget.Clickable
 	modeButtons                                            []widget.Clickable
+	fileModeGroup, runModeGroup                            widget.Enum
 
 	activePage    int
 	selectionMode int
@@ -119,6 +120,8 @@ func New() *Window {
 	initEditor(&w.endpoint, "/live/api/v5/jobs")
 	initEditor(&w.workers, "1")
 	initEditor(&w.maxCases, "100")
+	w.fileModeGroup.Value = "all"
+	w.runModeGroup.Value = "0"
 	w.window.Option(app.Title("API Automation"), app.Size(unit.Dp(1240), unit.Dp(900)), app.MinSize(unit.Dp(1100), unit.Dp(760)))
 	return w
 }
@@ -169,11 +172,11 @@ func (w *Window) Run() error {
 
 func (w *Window) handleClicks(gtx layout.Context) {
 	for w.captureButton.Clicked(gtx) {
-		w.activePage = 2
+		w.activePage = 1
 		w.captureCapabilities()
 	}
 	for w.runButton.Clicked(gtx) {
-		w.activePage = 3
+		w.activePage = 2
 		w.startRun()
 	}
 	for w.browseFolderButton.Clicked(gtx) {
@@ -190,6 +193,7 @@ func (w *Window) handleClicks(gtx layout.Context) {
 		} else if path != "" {
 			w.filePath.SetText(path)
 			w.selectionMode = 1
+			w.fileModeGroup.Value = "single"
 			w.addLog("Selected test file: %s", path)
 		}
 	}
@@ -245,18 +249,17 @@ func (w *Window) sidebar(gtx layout.Context) layout.Dimensions {
 	gtx.Constraints.Min.X, gtx.Constraints.Max.X = gtx.Dp(unit.Dp(210)), gtx.Dp(unit.Dp(210))
 	paint.FillShape(gtx.Ops, palette.navy, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	return layout.Inset{Top: unit.Dp(24), Left: unit.Dp(18), Right: unit.Dp(18)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		if len(w.navButtons) != 4 {
-			w.navButtons = make([]widget.Clickable, 4)
+		if len(w.navButtons) != 3 {
+			w.navButtons = make([]widget.Clickable, 3)
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(label(w.theme, "API Automation", 20, rgb(0xffffff)).Layout),
 			layout.Rigid(spacer(26)),
 			layout.Rigid(label(w.theme, "Workspace", 13, rgb(0x93a4bd)).Layout),
 			layout.Rigid(spacer(14)),
-			layout.Rigid(navButton(w.theme, &w.navButtons[0], "Server settings", w.activePage == 0)),
-			layout.Rigid(navButton(w.theme, &w.navButtons[1], "Test files", w.activePage == 1)),
-			layout.Rigid(navButton(w.theme, &w.navButtons[2], "Capabilities", w.activePage == 2)),
-			layout.Rigid(navButton(w.theme, &w.navButtons[3], "Results & logs", w.activePage == 3)),
+			layout.Rigid(navButton(w.theme, &w.navButtons[0], "Settings", w.activePage == 0)),
+			layout.Rigid(navButton(w.theme, &w.navButtons[1], "Capabilities", w.activePage == 1)),
+			layout.Rigid(navButton(w.theme, &w.navButtons[2], "Results & logs", w.activePage == 2)),
 		)
 	})
 }
@@ -267,8 +270,6 @@ func (w *Window) content(gtx layout.Context) layout.Dimensions {
 	case 0:
 		children = append(children, layout.Rigid(w.settingsCard))
 	case 1:
-		children = append(children, layout.Rigid(w.assetsCard))
-	case 2:
 		children = append(children, layout.Rigid(w.capabilitiesCard))
 	default:
 		children = append(children, layout.Rigid(w.resultsCard))
@@ -288,17 +289,37 @@ func (w *Window) header(gtx layout.Context) layout.Dimensions {
 
 func (w *Window) settingsCard(gtx layout.Context) layout.Dimensions {
 	return card(gtx, func(gtx layout.Context) layout.Dimensions {
-		gtx.Constraints.Max.X = minInt(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(760)))
+		gtx.Constraints.Max.X = minInt(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(860)))
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(label(w.theme, "Server connection", 24, palette.text).Layout),
 			layout.Rigid(spacer(6)),
 			layout.Rigid(label(w.theme, "Enter the Fiery server details used for discovery and automation.", 14, palette.muted).Layout),
-			layout.Rigid(spacer(24)),
+			layout.Rigid(spacer(22)),
 			layout.Rigid(serverConnectionField(w.theme, "Server IP address", "Example: 10.220.129.85", &w.serverIP)),
-			layout.Rigid(spacer(18)),
+			layout.Rigid(spacer(16)),
 			layout.Rigid(serverConnectionField(w.theme, "Secret key", "Fiery API access key", &w.secretKey)),
-			layout.Rigid(spacer(18)),
+			layout.Rigid(spacer(16)),
 			layout.Rigid(serverConnectionField(w.theme, "Admin password", "Administrator password", &w.password)),
+			layout.Rigid(spacer(34)),
+			layout.Rigid(label(w.theme, "Test File Setup", 24, palette.text).Layout),
+			layout.Rigid(spacer(6)),
+			layout.Rigid(label(w.theme, "Choose the PDF/job files to import during automation.", 14, palette.muted).Layout),
+			layout.Rigid(spacer(22)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return row(gtx, flexField(w.theme, "Folder path", "Folder containing test files", &w.folderPath), secondaryButton(w.theme, &w.browseFolderButton, "Browse folder"))
+			}),
+			layout.Rigid(spacer(16)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return row(gtx, flexField(w.theme, "Specific file path", "Optional single PDF/job file", &w.filePath), secondaryButton(w.theme, &w.browseFileButton, "Browse file"))
+			}),
+			layout.Rigid(spacer(18)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return row(gtx, field(w.theme, "Workers", &w.workers, 120), field(w.theme, "Endpoint", &w.endpoint, 300))
+			}),
+			layout.Rigid(spacer(24)),
+			layout.Rigid(w.fileSelectionRadioGroup),
+			layout.Rigid(spacer(24)),
+			layout.Rigid(w.runModeRadioGroup),
 		)
 	})
 }
@@ -323,15 +344,48 @@ func (w *Window) assetsCard(gtx layout.Context) layout.Dimensions {
 }
 
 func (w *Window) modeSelector(gtx layout.Context) layout.Dimensions {
-	children := []layout.FlexChild{layout.Rigid(label(w.theme, "Run mode", 14, palette.muted).Layout), layout.Rigid(spacerX(10))}
-	if len(w.modeButtons) != len(runModes) {
-		w.modeButtons = make([]widget.Clickable, len(runModes))
+	return w.runModeRadioGroup(gtx)
+}
+
+func (w *Window) fileSelectionRadioGroup(gtx layout.Context) layout.Dimensions {
+	return radioGroup(gtx, w.theme, "File selection", "Choose how files are picked for this run.", []radioOption{
+		{Key: "all", Label: "All files in folder"},
+		{Key: "single", Label: "Specific file only"},
+		{Key: "random", Label: "Random file from folder"},
+	}, &w.fileModeGroup)
+}
+
+func (w *Window) runModeRadioGroup(gtx layout.Context) layout.Dimensions {
+	options := make([]radioOption, 0, len(runModes))
+	for i, mode := range runModes {
+		options = append(options, radioOption{Key: strconv.Itoa(i), Label: mode.Label})
 	}
-	for i := range runModes {
-		idx := i
-		children = append(children, layout.Rigid(toggle(w.theme, &w.modeButtons[idx], runModes[idx].Label, w.runModeIndex == idx)), layout.Rigid(spacerX(8)))
+	return radioGroup(gtx, w.theme, "Run mode", "Select one Fiery lifecycle workflow.", options, &w.runModeGroup)
+}
+
+type radioOption struct{ Key, Label string }
+
+func radioGroup(gtx layout.Context, th *material.Theme, title, subtitle string, options []radioOption, group *widget.Enum) layout.Dimensions {
+	children := []layout.FlexChild{
+		layout.Rigid(label(th, title, 16, palette.text).Layout),
+		layout.Rigid(spacer(4)),
+		layout.Rigid(label(th, subtitle, 13, palette.muted).Layout),
+		layout.Rigid(spacer(10)),
 	}
-	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
+	for _, option := range options {
+		opt := option
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				radio := material.RadioButton(th, group, opt.Key, opt.Label)
+				radio.Color = palette.text
+				radio.IconColor = palette.primary
+				return radio.Layout(gtx)
+			})
+		}))
+	}
+	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	})
 }
 
 func (w *Window) capabilitiesCard(gtx layout.Context) layout.Dimensions {
@@ -603,7 +657,7 @@ func (w *Window) startRun() {
 	}
 	combos := w.selectedCombinations()
 	w.logSelectedCombinations(combos)
-	mode := runModes[w.runModeIndex]
+	mode := runModes[w.currentRunModeIndex()]
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
 	w.running.Store(true)
@@ -896,14 +950,26 @@ func (w *Window) server() (model.ServerConnection, bool) {
 	return s, true
 }
 func (w *Window) fileMode() model.FileSelectionMode {
-	switch w.selectionMode {
-	case 1:
+	switch w.fileModeGroup.Value {
+	case "single":
+		w.selectionMode = 1
 		return model.FileSelectionSingle
-	case 2:
+	case "random":
+		w.selectionMode = 2
 		return model.FileSelectionRandom
 	default:
+		w.selectionMode = 0
 		return model.FileSelectionAll
 	}
+}
+
+func (w *Window) currentRunModeIndex() int {
+	idx, err := strconv.Atoi(w.runModeGroup.Value)
+	if err != nil || idx < 0 || idx >= len(runModes) {
+		return w.runModeIndex
+	}
+	w.runModeIndex = idx
+	return idx
 }
 func (w *Window) selectedCombinations() []combinations.Combination {
 	w.mu.Lock()
@@ -1131,6 +1197,13 @@ func field(th *material.Theme, title string, ed *widget.Editor, width int) layou
 	return func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X, gtx.Constraints.Max.X = gtx.Dp(unit.Dp(width)), gtx.Dp(unit.Dp(width))
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(label(th, title, 13, palette.muted).Layout), layout.Rigid(func(gtx layout.Context) layout.Dimensions { e := material.Editor(th, ed, ""); return e.Layout(gtx) }))
+	}
+}
+
+func flexField(th *material.Theme, title, hint string, ed *widget.Editor) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Min.X = minInt(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(560)))
+		return serverConnectionField(th, title, hint, ed)(gtx)
 	}
 }
 
