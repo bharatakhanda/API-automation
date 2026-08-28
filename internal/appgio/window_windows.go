@@ -734,6 +734,10 @@ func (w *Window) performModeLifecycle(ctx context.Context, client *fiery.Client,
 			if err := client.JobAction(ctx, session, jobID, "rip"); err != nil {
 				return err
 			}
+			w.addLog("Waiting for job %s status=done ripping after RIP", jobID)
+			if err := client.WaitJobAttribute(ctx, session, jobID, "status", "done ripping", 6*time.Minute, 2*time.Second); err != nil {
+				return err
+			}
 		case "production":
 			w.addLog("Waiting for job %s status=done ripping before Ready to Print", jobID)
 			if err := client.WaitJobAttribute(ctx, session, jobID, "status", "done ripping", 6*time.Minute, 2*time.Second); err != nil {
