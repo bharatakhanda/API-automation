@@ -39,15 +39,15 @@ import (
 var palette = struct {
 	bg, surface, surfaceAlt, navy, text, muted, border, primary, primaryDim, danger, success color.NRGBA
 }{
-	bg:         rgb(0xf3f6fb),
-	surface:    rgb(0xffffff),
-	surfaceAlt: rgb(0xf6f8fc),
+	bg:         rgb(0xeaf0f7),
+	surface:    rgb(0xf7faff),
+	surfaceAlt: rgb(0xeef4fb),
 	navy:       rgb(0x0f172a),
 	text:       rgb(0x172033),
-	muted:      rgb(0x64748b),
-	border:     rgb(0xdbe4f0),
+	muted:      rgb(0x5f718b),
+	border:     rgb(0xcbd8e8),
 	primary:    rgb(0x2563eb),
-	primaryDim: rgb(0xdbeafe),
+	primaryDim: rgb(0xd7e6fb),
 	danger:     rgb(0xb91c1c),
 	success:    rgb(0x15803d),
 }
@@ -238,7 +238,7 @@ func (w *Window) layout(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.sidebar(gtx) }),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(24), Right: unit.Dp(28), Bottom: unit.Dp(20), Left: unit.Dp(24)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(24), Right: unit.Dp(28), Bottom: unit.Dp(20), Left: unit.Dp(28)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return w.list.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions { return w.content(gtx) })
 			})
 		}),
@@ -1190,20 +1190,26 @@ func (w *Window) addResult(file, method, status string, d time.Duration, detail 
 
 func card(gtx layout.Context, child layout.Widget) layout.Dimensions {
 	return layout.UniformInset(unit.Dp(18)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		paint.FillShape(gtx.Ops, palette.surface, clip.RRect{Rect: image.Rectangle{Max: gtx.Constraints.Max}, SE: 12, SW: 12, NE: 12, NW: 12}.Op(gtx.Ops))
+		rr := clip.RRect{Rect: image.Rectangle{Max: gtx.Constraints.Max}, SE: 16, SW: 16, NE: 16, NW: 16}
+		paint.FillShape(gtx.Ops, palette.surface, rr.Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, rgb(0xd8e2ef), clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(gtx.Dp(unit.Dp(1)))}.Op())
 		return child(gtx)
 	})
 }
 func surfaceAlt(gtx layout.Context, child layout.Widget) layout.Dimensions {
 	return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		paint.FillShape(gtx.Ops, palette.surfaceAlt, clip.RRect{Rect: image.Rectangle{Max: gtx.Constraints.Max}, SE: 8, SW: 8, NE: 8, NW: 8}.Op(gtx.Ops))
+		rr := clip.RRect{Rect: image.Rectangle{Max: gtx.Constraints.Max}, SE: 10, SW: 10, NE: 10, NW: 10}
+		paint.FillShape(gtx.Ops, palette.surfaceAlt, rr.Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, rgb(0xd8e2ef), clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(gtx.Dp(unit.Dp(1)))}.Op())
 		return child(gtx)
 	})
 }
 
 func formPanel(gtx layout.Context, child layout.Widget) layout.Dimensions {
-	return layout.UniformInset(unit.Dp(18)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		paint.FillShape(gtx.Ops, palette.surfaceAlt, clip.RRect{Rect: image.Rectangle{Max: gtx.Constraints.Max}, SE: 14, SW: 14, NE: 14, NW: 14}.Op(gtx.Ops))
+	return layout.UniformInset(unit.Dp(20)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		rr := clip.RRect{Rect: image.Rectangle{Max: gtx.Constraints.Max}, SE: 16, SW: 16, NE: 16, NW: 16}
+		paint.FillShape(gtx.Ops, palette.surfaceAlt, rr.Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, rgb(0xd8e2ef), clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(gtx.Dp(unit.Dp(1)))}.Op())
 		return child(gtx)
 	})
 }
@@ -1235,7 +1241,7 @@ func fieldBox(th *material.Theme, title, hint string, ed *widget.Editor, width i
 				gtx.Constraints.Min.X = gtx.Constraints.Max.X
 				gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(52))
 				rr := clip.UniformRRect(image.Rectangle{Max: gtx.Constraints.Min}, gtx.Dp(unit.Dp(10)))
-				paint.FillShape(gtx.Ops, rgb(0xffffff), rr.Op(gtx.Ops))
+				paint.FillShape(gtx.Ops, rgb(0xfbfdff), rr.Op(gtx.Ops))
 				paint.FillShape(gtx.Ops, palette.border, clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(gtx.Dp(unit.Dp(1)))}.Op())
 				return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(14), Bottom: unit.Dp(8), Left: unit.Dp(14)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					editor := material.Editor(th, ed, hint)
