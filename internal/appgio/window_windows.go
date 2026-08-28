@@ -855,6 +855,9 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		if got[k] != v {
 			status = "FAIL"
 			detail = fmt.Sprintf("mode=%s: %s set=%q got=%q availableKeys=%s", mode.Label, k, v, got[k], short(strings.Join(sortedKeys(got), ","), 220))
+			if requiresRipReadback(k) && !modeIncludesAction(mode, "rip") {
+				detail += "; note=this attribute is typically readable only after RIP, select RIP or Process and Hold for strict verification"
+			}
 			break
 		}
 	}
@@ -873,18 +876,17 @@ func (w *Window) confirmAttributeUpdate(ctx context.Context, client *fiery.Clien
 	if len(expected) == 0 {
 		return nil
 	}
-	// Some Fiery command/rerip attributes, especially EFResolution, are only
-	// materialized in the job GET response after RIP completes. Do not fail early
-	// for modes that will RIP; final verification runs after lifecycle actions.
+	// Attribute POST success means the server accepted the update request. Some
+	// Fiery attributes are not readable immediately, and some command/rerip
+	// attributes such as EFResolution are materialized only after RIP. Therefore
+	// do not fail the run here; final strict set/get verification runs after the
+	// selected lifecycle actions complete.
 	if modeIncludesAction(mode, "rip") {
 		w.addLog("Attribute update accepted for job %s; final set/get verification will run after RIP", jobID)
-		return nil
+	} else {
+		w.addLog("Attribute update accepted for job %s; final set/get verification will run after mode %s", jobID, mode.Label)
 	}
-	w.addLog("Confirming updated attributes are readable for job %s", jobID)
-	_, err := w.waitJobCondition(ctx, client, session, jobID, "updated attributes readable", 20*time.Second, 1*time.Second, func(attrs map[string]string) bool {
-		return attributesPresent(attrs, expected)
-	})
-	return err
+	return nil
 }
 
 func (w *Window) readBackAttributes(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, expected map[string]string) (map[string]string, error) {
@@ -1036,6 +1038,15 @@ func modeIncludesAction(mode runMode, want string) bool {
 		}
 	}
 	return false
+}
+
+func requiresRipReadback(key string) bool {
+	switch key {
+	case "EFResolution", "EFPrintSpeed":
+		return true
+	default:
+		return false
+	}
 }
 
 func (w *Window) server() (model.ServerConnection, bool) {
