@@ -858,7 +858,7 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 	for k, v := range attrs {
 		if got[k] != v {
 			status = "FAIL"
-			detail = fmt.Sprintf("mode=%s: %s set=%q got=%q availableKeys=%s", mode.Label, k, v, got[k], short(strings.Join(sortedKeys(got), ","), 220))
+			detail = fmt.Sprintf("mode=%s: %s set=%q got=%q status=%q state=%q display=%q recent=%q related=%s availableKeys=%s", mode.Label, k, v, got[k], got["status"], got["state"], got["display status"], got["recent action"], relatedReadbackValues(got), short(strings.Join(sortedKeys(got), ","), 220))
 			if requiresRipReadback(k) && !modeIncludesAction(mode, "rip") {
 				detail += "; note=this attribute is typically readable only after RIP, select RIP or Process and Hold for strict verification"
 			}
@@ -1068,6 +1068,20 @@ func requiresRipReadback(key string) bool {
 	default:
 		return false
 	}
+}
+
+func relatedReadbackValues(attrs map[string]string) string {
+	keys := []string{"EFResolution", "Resolution", "EFPrintSpeed", "EFRaster", "EFPrintSize", "PageSize", "CustomPrintSize", "has disk raster?"}
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if value, ok := attrs[key]; ok {
+			parts = append(parts, fmt.Sprintf("%s=%q", key, value))
+		}
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (w *Window) server() (model.ServerConnection, bool) {

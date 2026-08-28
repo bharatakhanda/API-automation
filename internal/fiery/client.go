@@ -241,7 +241,7 @@ func (c *Client) GetJobAttributes(ctx context.Context, session Session, jobID st
 	}
 	merged := map[string]string{}
 	var failures []string
-	for _, apiPath := range []string{apiV4, apiV5} {
+	for _, apiPath := range []string{apiV5, apiV4} {
 		for _, suffix := range []string{"", "/attributes", "/properties"} {
 			attrs, err := c.getJobAttributesAt(ctx, session, apiPath, jobID, suffix)
 			if err != nil {
