@@ -894,28 +894,45 @@ func (w *Window) confirmAttributeUpdate(ctx context.Context, client *fiery.Clien
 }
 
 func (w *Window) readBackAttributes(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, expected map[string]string) (map[string]string, error) {
+	if len(expected) == 0 {
+		return client.GetJobAttributes(ctx, session, jobID)
+	}
+	deadline := time.NewTimer(45 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 	var got map[string]string
 	var err error
-	for attempt := 1; attempt <= 4; attempt++ {
+	for {
 		got, err = client.GetJobAttributes(ctx, session, jobID)
 		if err != nil {
 			return nil, err
 		}
-		if attributesPresent(got, expected) {
+		if attributesMatch(got, expected) {
 			return got, nil
 		}
 		select {
 		case <-ctx.Done():
 			return got, ctx.Err()
-		case <-time.After(750 * time.Millisecond):
+		case <-deadline.C:
+			return got, nil
+		case <-ticker.C:
 		}
 	}
-	return got, nil
 }
 
 func attributesPresent(got, expected map[string]string) bool {
 	for key := range expected {
 		if _, ok := got[key]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func attributesMatch(got, expected map[string]string) bool {
+	for key, want := range expected {
+		if got[key] != want {
 			return false
 		}
 	}

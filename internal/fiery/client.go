@@ -286,10 +286,10 @@ func (c *Client) getJobAttributesAt(ctx context.Context, session Session, apiPat
 }
 
 func (c *Client) UpdateJobAttributes(ctx context.Context, session Session, jobID string, attributes map[string]string) error {
-	if err := c.updateJobAttributes(ctx, session, apiV4, jobID, attributes); err == nil {
+	if err := c.updateJobAttributes(ctx, session, apiV5, jobID, attributes); err == nil {
 		return nil
-	} else if fallbackErr := c.updateJobAttributes(ctx, session, apiV5, jobID, attributes); fallbackErr != nil {
-		return fmt.Errorf("v4 job attribute update failed: %w; v5 job attribute update failed: %w", err, fallbackErr)
+	} else if fallbackErr := c.updateJobAttributes(ctx, session, apiV4, jobID, attributes); fallbackErr != nil {
+		return fmt.Errorf("v5 job attribute update failed: %w; v4 job attribute update failed: %w", err, fallbackErr)
 	}
 	return nil
 }
