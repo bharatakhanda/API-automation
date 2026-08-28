@@ -288,9 +288,18 @@ func (w *Window) header(gtx layout.Context) layout.Dimensions {
 
 func (w *Window) settingsCard(gtx layout.Context) layout.Dimensions {
 	return card(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(sectionTitle(w.theme, "01 Settings · Server connection")), layout.Rigid(spacer(12)), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return row(gtx, field(w.theme, "Server IP", &w.serverIP, 220), field(w.theme, "Secret key", &w.secretKey, 420), field(w.theme, "Admin password", &w.password, 220))
-		}))
+		gtx.Constraints.Max.X = minInt(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(760)))
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(label(w.theme, "Server connection", 24, palette.text).Layout),
+			layout.Rigid(spacer(6)),
+			layout.Rigid(label(w.theme, "Enter the Fiery server details used for discovery and automation.", 14, palette.muted).Layout),
+			layout.Rigid(spacer(24)),
+			layout.Rigid(serverConnectionField(w.theme, "Server IP address", "Example: 10.220.129.85", &w.serverIP)),
+			layout.Rigid(spacer(18)),
+			layout.Rigid(serverConnectionField(w.theme, "Secret key", "Fiery API access key", &w.secretKey)),
+			layout.Rigid(spacer(18)),
+			layout.Rigid(serverConnectionField(w.theme, "Admin password", "Administrator password", &w.password)),
+		)
 	})
 }
 func (w *Window) assetsCard(gtx layout.Context) layout.Dimensions {
@@ -1033,6 +1042,13 @@ func sortedKeys(values map[string]string) []string {
 	return keys
 }
 
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func selectedValues(m map[string]*widget.Bool) []string {
 	var vals []string
 	for v, b := range m {
@@ -1115,6 +1131,27 @@ func field(th *material.Theme, title string, ed *widget.Editor, width int) layou
 	return func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X, gtx.Constraints.Max.X = gtx.Dp(unit.Dp(width)), gtx.Dp(unit.Dp(width))
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(label(th, title, 13, palette.muted).Layout), layout.Rigid(func(gtx layout.Context) layout.Dimensions { e := material.Editor(th, ed, ""); return e.Layout(gtx) }))
+	}
+}
+
+func serverConnectionField(th *material.Theme, title, hint string, ed *widget.Editor) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(label(th, title, 14, palette.text).Layout),
+			layout.Rigid(spacer(8)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+				gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(52))
+				rr := clip.UniformRRect(image.Rectangle{Max: gtx.Constraints.Min}, gtx.Dp(unit.Dp(10)))
+				paint.FillShape(gtx.Ops, rgb(0xf8fafc), rr.Op(gtx.Ops))
+				paint.FillShape(gtx.Ops, palette.border, clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(gtx.Dp(unit.Dp(1)))}.Op())
+				return layout.Inset{Top: unit.Dp(10), Right: unit.Dp(14), Bottom: unit.Dp(8), Left: unit.Dp(14)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					editor := material.Editor(th, ed, hint)
+					editor.TextSize = 16
+					return editor.Layout(gtx)
+				})
+			}),
+		)
 	}
 }
 func row(gtx layout.Context, widgets ...layout.Widget) layout.Dimensions {
