@@ -340,11 +340,11 @@ func (w *Window) settingsCard(gtx layout.Context) layout.Dimensions {
 						layout.Rigid(label(w.theme, "Choose the files to import during automation.", 14, palette.muted).Layout),
 						layout.Rigid(spacer(22)),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return row(gtx, fieldBox(w.theme, "Folder path", "Folder containing test files", &w.folderPath, 640), secondaryButton(w.theme, &w.browseFolderButton, "Browse folder"))
+							return row(gtx, fieldBox(w.theme, "Folder path", "Folder containing test files", &w.folderPath, 640), browseButton(w.theme, &w.browseFolderButton, "Browse folder"))
 						}),
 						layout.Rigid(spacer(16)),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return row(gtx, fieldBox(w.theme, "Specific file path", "Optional single PDF/job file", &w.filePath, 640), secondaryButton(w.theme, &w.browseFileButton, "Browse file"))
+							return row(gtx, fieldBox(w.theme, "Specific file path", "Optional single PDF/job file", &w.filePath, 640), browseButton(w.theme, &w.browseFileButton, "Browse file"))
 						}),
 						layout.Rigid(spacer(18)),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -453,14 +453,14 @@ func (w *Window) capabilitiesCard(gtx layout.Context) layout.Dimensions {
 	w.mu.Unlock()
 	return card(gtx, func(gtx layout.Context) layout.Dimensions {
 		if len(model.Options) == 0 && len(model.Queues) == 0 {
-			children := []layout.FlexChild{layout.Rigid(sectionTitle(w.theme, "03 Server capabilities")), layout.Rigid(spacer(10))}
+			children := []layout.FlexChild{layout.Rigid(sectionTitle(w.theme, "Server capabilities")), layout.Rigid(spacer(10))}
 			if active {
 				children = append(children, layout.Rigid(w.captureProgressPanel), layout.Rigid(spacer(10)))
 			}
 			children = append(children, layout.Rigid(label(w.theme, "Click Get server capabilities. Options will appear here after the server responds.", 14, palette.muted).Layout))
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 		}
-		children := []layout.FlexChild{layout.Rigid(sectionTitle(w.theme, fmt.Sprintf("03 Server capabilities · %s", fallback(model.ServerName, "discovered")))), layout.Rigid(spacer(10))}
+		children := []layout.FlexChild{layout.Rigid(sectionTitle(w.theme, fmt.Sprintf("Server capabilities · %s", fallback(model.ServerName, "discovered")))), layout.Rigid(spacer(10))}
 		if active {
 			children = append(children, layout.Rigid(w.captureProgressPanel), layout.Rigid(spacer(10)))
 		}
@@ -519,7 +519,7 @@ func (w *Window) queueGroup(model capabilities.Model) layout.Widget {
 		} else {
 			items = append(items, layout.Rigid(label(w.theme, fmt.Sprintf("Available queues: %d of %d", available, len(model.Queues)), 13, palette.muted).Layout))
 		}
-		return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+		return formPanel(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, items...)
 		})
 	}
@@ -531,7 +531,7 @@ func (w *Window) capabilityGroup(gtx layout.Context, group capabilities.OptionGr
 		option := opt
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionRow(gtx, option) }), layout.Rigid(spacer(8)))
 	}
-	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+	return formPanel(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 	})
 }
@@ -748,6 +748,10 @@ func (w *Window) startRun() {
 	modes := w.selectedRunModes()
 	if len(modes) == 0 {
 		w.setStatus("Select at least one run mode.")
+		return
+	}
+	if combinationsRequireRipReadback(combos) && !runModesIncludeAction(modes, "rip") {
+		w.setStatus("Selected capabilities require RIP before strict verification. Select Process and Hold or RIP run mode.")
 		return
 	}
 	w.addLog("Selected run modes: %s", formatRunModes(modes))
@@ -1042,7 +1046,7 @@ func modeIncludesAction(mode runMode, want string) bool {
 
 func requiresRipReadback(key string) bool {
 	switch key {
-	case "EFResolution", "EFPrintSpeed":
+	case "EFResolution", "EFPrintSpeed", "EFRotateDocument":
 		return true
 	default:
 		return false
@@ -1099,6 +1103,26 @@ func formatRunModes(modes []runMode) string {
 		labels = append(labels, mode.Label)
 	}
 	return strings.Join(labels, ", ")
+}
+
+func runModesIncludeAction(modes []runMode, action string) bool {
+	for _, mode := range modes {
+		if modeIncludesAction(mode, action) {
+			return true
+		}
+	}
+	return false
+}
+
+func combinationsRequireRipReadback(combos []combinations.Combination) bool {
+	for _, combo := range combos {
+		for key := range combo {
+			if requiresRipReadback(key) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (w *Window) selectedCombinations() []combinations.Combination {
@@ -1392,6 +1416,15 @@ func secondaryButton(th *material.Theme, b *widget.Clickable, text string) layou
 		btn := material.Button(th, b, text)
 		btn.Background = palette.surfaceAlt
 		btn.Color = palette.text
+		return btn.Layout(gtx)
+	}
+}
+
+func browseButton(th *material.Theme, b *widget.Clickable, text string) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		btn := material.Button(th, b, text)
+		btn.Background = palette.primaryDim
+		btn.Color = palette.primary
 		return btn.Layout(gtx)
 	}
 }
