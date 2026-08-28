@@ -4,6 +4,7 @@ package appgio
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -906,8 +907,10 @@ func (w *Window) readBackAttributes(ctx context.Context, client *fiery.Client, s
 	for {
 		got, err = client.GetJobAttributes(ctx, session, jobID)
 		if err != nil {
+			w.diagnostic.printf("READBACK: job=%s attempt=error error=%v", jobID, err)
 			return nil, err
 		}
+		w.logAttributeReadback(jobID, got, expected)
 		if attributesMatch(got, expected) {
 			return got, nil
 		}
@@ -919,6 +922,38 @@ func (w *Window) readBackAttributes(ctx context.Context, client *fiery.Client, s
 		case <-ticker.C:
 		}
 	}
+}
+
+func (w *Window) logAttributeReadback(jobID string, got, expected map[string]string) {
+	payload := struct {
+		JobID         string            `json:"jobId"`
+		Expected      map[string]string `json:"expected"`
+		Matched       bool              `json:"matched"`
+		Status        string            `json:"status"`
+		State         string            `json:"state"`
+		DisplayStatus string            `json:"displayStatus"`
+		RecentAction  string            `json:"recentAction"`
+		Related       map[string]string `json:"related"`
+		AvailableKeys []string          `json:"availableKeys"`
+		AllAttributes map[string]string `json:"allAttributes"`
+	}{
+		JobID:         jobID,
+		Expected:      expected,
+		Matched:       attributesMatch(got, expected),
+		Status:        got["status"],
+		State:         got["state"],
+		DisplayStatus: got["display status"],
+		RecentAction:  got["recent action"],
+		Related:       relatedReadbackMap(got),
+		AvailableKeys: sortedKeys(got),
+		AllAttributes: got,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		w.diagnostic.printf("READBACK: job=%s marshal error=%v", jobID, err)
+		return
+	}
+	w.diagnostic.printf("READBACK: %s", string(encoded))
 }
 
 func attributesPresent(got, expected map[string]string) bool {
@@ -1071,17 +1106,27 @@ func requiresRipReadback(key string) bool {
 }
 
 func relatedReadbackValues(attrs map[string]string) string {
-	keys := []string{"EFResolution", "Resolution", "EFPrintSpeed", "EFRaster", "EFPrintSize", "PageSize", "CustomPrintSize", "has disk raster?"}
-	parts := make([]string, 0, len(keys))
-	for _, key := range keys {
-		if value, ok := attrs[key]; ok {
-			parts = append(parts, fmt.Sprintf("%s=%q", key, value))
-		}
-	}
-	if len(parts) == 0 {
+	related := relatedReadbackMap(attrs)
+	if len(related) == 0 {
 		return "none"
 	}
+	keys := sortedKeys(related)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%q", key, related[key]))
+	}
 	return strings.Join(parts, ", ")
+}
+
+func relatedReadbackMap(attrs map[string]string) map[string]string {
+	keys := []string{"EFResolution", "Resolution", "EFPrintSpeed", "EFRaster", "EFPrintSize", "PageSize", "CustomPrintSize", "has disk raster?", "EFBrightness", "EFColorMode", "num copies"}
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := attrs[key]; ok {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 func (w *Window) server() (model.ServerConnection, bool) {
