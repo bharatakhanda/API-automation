@@ -314,7 +314,7 @@ func (w *Window) settingsCard(gtx layout.Context) layout.Dimensions {
 			}),
 			layout.Rigid(spacer(18)),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return row(gtx, field(w.theme, "Workers", &w.workers, 120), field(w.theme, "Endpoint", &w.endpoint, 300))
+				return row(gtx, field(w.theme, "Parallel jobs", &w.workers, 120), field(w.theme, "Endpoint", &w.endpoint, 300))
 			}),
 			layout.Rigid(spacer(24)),
 			layout.Rigid(w.fileSelectionRadioGroup),
