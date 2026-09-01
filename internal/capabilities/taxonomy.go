@@ -1,11 +1,6 @@
 package capabilities
 
-type Group struct {
-	Name         string
-	Capabilities []string
-}
-
-type CanonicalOption struct {
+type canonicalOption struct {
 	CanonicalID string
 	Label       string
 	APIKeys     []string
@@ -16,22 +11,11 @@ type OptionGroup struct {
 	Options []Option
 }
 
-var Taxonomy = []Group{
-	{Name: "Environment", Capabilities: []string{"ServerVersion", "DeviceModel", "ServerStatus"}},
-	{Name: "Queues", Capabilities: []string{"Hold", "Print", "Direct", "AvailableQueues", "DefaultQueue"}},
-	{Name: "Print", Capabilities: []string{"EFBrightness", "EFResolution", "EFCopies", "EFRotation", "Scaling"}},
-	{Name: "Rendering", Capabilities: []string{"EFFineLineRendering", "EFImageSmoothing", "EFEdgeEnhancement"}},
-	{Name: "Color", Capabilities: []string{"EFColorMode", "EFColorantDepth", "OutputICCProfile", "RGBSourceProfile", "CMYKSourceProfile", "GrayProfile", "EnabledColorants", "InkDropSizes", "SpotColorCount"}},
-	{Name: "Media", Capabilities: []string{"EFMediaType", "EFInputSlot", "EFOutputBin", "SubstrateWidth", "SubstrateHeight"}},
-	{Name: "Layout", Capabilities: []string{"EFOrientation", "ImagePositionX", "ImagePositionY"}},
-	{Name: "Job", Capabilities: []string{"HasTransparency"}},
-}
-
-var CanonicalTaxonomy = []struct {
+var canonicalTaxonomy = []struct {
 	Name    string
-	Options []CanonicalOption
+	Options []canonicalOption
 }{
-	{Name: "Print", Options: []CanonicalOption{
+	{Name: "Print", Options: []canonicalOption{
 		{CanonicalID: "EFBrightness", Label: "Brightness", APIKeys: []string{"EFBrightness"}},
 		{CanonicalID: "EFResolution", Label: "Resolution", APIKeys: []string{"EFResolution"}},
 		{CanonicalID: "EFCopies", Label: "Copies", APIKeys: []string{"EFCopies", "num copies"}},
@@ -39,12 +23,12 @@ var CanonicalTaxonomy = []struct {
 		{CanonicalID: "EFRotation", Label: "Rotation", APIKeys: []string{"EFRotateDocument", "EFRotation"}},
 		{CanonicalID: "Scaling", Label: "Scaling", APIKeys: []string{"Scaling", "EFScale"}},
 	}},
-	{Name: "Rendering", Options: []CanonicalOption{
+	{Name: "Rendering", Options: []canonicalOption{
 		{CanonicalID: "EFFineLineRendering", Label: "Fine line rendering", APIKeys: []string{"EFTextGfxQual", "EFFineLineRendering"}},
 		{CanonicalID: "EFImageSmoothing", Label: "Image smoothing", APIKeys: []string{"EFImageSmooth", "EFImageSmoothing"}},
 		{CanonicalID: "EFEdgeEnhancement", Label: "Edge enhancement", APIKeys: []string{"EFEdgeDropSize", "EFEdgeEnhancement"}},
 	}},
-	{Name: "Color", Options: []CanonicalOption{
+	{Name: "Color", Options: []canonicalOption{
 		{CanonicalID: "EFColorMode", Label: "Color mode", APIKeys: []string{"EFColorMode"}},
 		{CanonicalID: "EFColorantDepth", Label: "Colorant depth", APIKeys: []string{"EFColorantDepth"}},
 		{CanonicalID: "OutputICCProfile", Label: "Output ICC profile", APIKeys: []string{"EFOutProfile", "OutputICCProfile"}},
@@ -55,33 +39,38 @@ var CanonicalTaxonomy = []struct {
 		{CanonicalID: "InkDropSizes", Label: "Ink/drop size", APIKeys: []string{"EFEdgeDropSize", "InkDropSizes"}},
 		{CanonicalID: "SpotColorCount", Label: "Spot color matching", APIKeys: []string{"EFSpotColors", "SpotColorCount"}},
 	}},
-	{Name: "Media", Options: []CanonicalOption{
+	{Name: "Media", Options: []canonicalOption{
 		{CanonicalID: "EFMediaType", Label: "Media type", APIKeys: []string{"EFMediaType"}},
 		{CanonicalID: "EFInputSlot", Label: "Input slot", APIKeys: []string{"InputSlot", "EFInputSlot"}},
 		{CanonicalID: "EFOutputBin", Label: "Output tray", APIKeys: []string{"EFOutputBin"}},
 		{CanonicalID: "SubstrateWidth", Label: "Substrate width", APIKeys: []string{"SubstrateWidth", "EFMediaWidth"}},
 		{CanonicalID: "SubstrateHeight", Label: "Substrate height", APIKeys: []string{"SubstrateHeight", "EFMediaLength"}},
 	}},
-	{Name: "Layout", Options: []CanonicalOption{
+	{Name: "Layout", Options: []canonicalOption{
 		{CanonicalID: "EFOrientation", Label: "Orientation", APIKeys: []string{"EFOrientation", "Orientation"}},
 		{CanonicalID: "ImagePositionX", Label: "Image position X", APIKeys: []string{"EFImageFrontXOutput", "ImagePositionX"}},
 		{CanonicalID: "ImagePositionY", Label: "Image position Y", APIKeys: []string{"EFImageFrontYOutput", "ImagePositionY"}},
 	}},
-	{Name: "Job", Options: []CanonicalOption{
+	{Name: "Job", Options: []canonicalOption{
 		{CanonicalID: "HasTransparency", Label: "PDF transparency", APIKeys: []string{"EFPDF_PS_RGB_Transparency", "HasTransparency"}},
 	}},
 }
 
 func GroupedOptions(model Model) []OptionGroup {
-	groups := make([]OptionGroup, 0, len(CanonicalTaxonomy))
+	groups := make([]OptionGroup, 0, len(canonicalTaxonomy))
 	used := map[string]struct{}{}
-	for _, group := range CanonicalTaxonomy {
+	for _, group := range canonicalTaxonomy {
 		out := OptionGroup{Name: group.Name}
 		for _, canonical := range group.Options {
 			if opt, ok := firstOptionByKeys(model, canonical.APIKeys); ok {
+				if _, duplicate := used[opt.ID]; duplicate {
+					continue
+				}
 				opt.Label = canonical.Label
 				out.Options = append(out.Options, opt)
-				used[opt.ID] = struct{}{}
+				for _, apiKey := range canonical.APIKeys {
+					used[apiKey] = struct{}{}
+				}
 			}
 		}
 		if len(out.Options) > 0 {

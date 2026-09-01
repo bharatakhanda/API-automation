@@ -80,10 +80,19 @@ func applyInfo(model *Model, body json.RawMessage) {
 			} `json:"item"`
 		} `json:"data"`
 	}
-	if json.Unmarshal(body, &payload) == nil {
-		model.ServerName = payload.Data.Item.Name
-		model.SerialNumber = payload.Data.Item.SerialNumber
-		model.Version = payload.Data.Item.Version
+	if json.Unmarshal(body, &payload) != nil {
+		return
+	}
+	// Discovery may return both v5 and v4 info. Do not let a later endpoint
+	// with a partial response erase values already learned from another version.
+	if value := strings.TrimSpace(payload.Data.Item.Name); value != "" {
+		model.ServerName = value
+	}
+	if value := strings.TrimSpace(payload.Data.Item.SerialNumber); value != "" {
+		model.SerialNumber = value
+	}
+	if value := strings.TrimSpace(payload.Data.Item.Version); value != "" {
+		model.Version = value
 	}
 }
 
@@ -148,7 +157,12 @@ func parseProperties(body json.RawMessage) []Option {
 			Enabled: len(values) > 0 || value != "",
 		})
 	}
-	sort.Slice(options, func(i, j int) bool { return options[i].Label < options[j].Label })
+	sort.Slice(options, func(i, j int) bool {
+		if options[i].Label != options[j].Label {
+			return options[i].Label < options[j].Label
+		}
+		return options[i].ID < options[j].ID
+	})
 	return options
 }
 
@@ -166,7 +180,12 @@ func addSyntheticCopiesOption(options []Option) []Option {
 		Scopes:  []string{"command", "cws", "job", "manual-from-scope-guidance"},
 		Enabled: true,
 	})
-	sort.Slice(options, func(i, j int) bool { return options[i].Label < options[j].Label })
+	sort.Slice(options, func(i, j int) bool {
+		if options[i].Label != options[j].Label {
+			return options[i].Label < options[j].Label
+		}
+		return options[i].ID < options[j].ID
+	})
 	return options
 }
 
@@ -188,5 +207,8 @@ func cleanValues(values []any) []string {
 }
 
 func cleanValue(value any) string {
+	if value == nil {
+		return ""
+	}
 	return strings.Trim(strings.TrimSpace(fmt.Sprint(value)), "\ufeff")
 }

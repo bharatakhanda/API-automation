@@ -35,6 +35,24 @@ func TestFromSnapshotExtractsServerQueuesAndOptions(t *testing.T) {
 	}
 }
 
+func TestFromSnapshotKeepsExistingInfoWhenLaterResponseIsPartial(t *testing.T) {
+	snapshot := fiery.CapabilitySnapshot{Endpoints: []fiery.EndpointSnapshot{
+		{Name: "v5_info", Body: raw(`{"data":{"item":{"name":"SERVER-85","serial_number":"P00014754","version":"1.4"}}}`)},
+		{Name: "v4_info", Body: raw(`{"data":{"item":{"name":""}}}`)},
+	}}
+	model := FromSnapshot(snapshot)
+	if model.ServerName != "SERVER-85" || model.SerialNumber != "P00014754" || model.Version != "1.4" {
+		t.Fatalf("later partial info erased metadata: %#v", model)
+	}
+}
+
+func TestParsePropertiesIgnoresNullValues(t *testing.T) {
+	options := parseProperties(raw(`{"data":{"items":[{"id":"NullOption","value":null,"values":[null,"", "valid"]}]}}`))
+	if len(options) != 1 || options[0].Value != "" || len(options[0].Values) != 1 || options[0].Values[0] != "valid" {
+		t.Fatalf("unexpected null normalization: %#v", options)
+	}
+}
+
 func TestCapturedSnapshotProducesUIPopulatableModel(t *testing.T) {
 	path := filepath.Join("..", "..", "server-capabilities-snapshot-20260827-174908.json")
 	data, err := os.ReadFile(path)
@@ -60,6 +78,40 @@ func TestCapturedSnapshotProducesUIPopulatableModel(t *testing.T) {
 		if !ok || len(option.Values) == 0 {
 			t.Fatalf("expected option %s with values, got %#v", id, option)
 		}
+	}
+}
+
+func TestGroupedOptionsDoesNotDisplayOneAPIOptionTwice(t *testing.T) {
+	model := Model{Options: []Option{{ID: "EFEdgeDropSize", Label: "Edge", Values: []string{"1"}}}}
+	groups := GroupedOptions(model)
+	count := 0
+	for _, group := range groups {
+		for _, option := range group.Options {
+			if option.ID == "EFEdgeDropSize" {
+				count++
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("EFEdgeDropSize displayed %d times, want 1", count)
+	}
+}
+
+func TestGroupedOptionsDoesNotDisplayCopiesAliasesTwice(t *testing.T) {
+	model := Model{Options: []Option{
+		{ID: "EFCopies", Values: []string{"1"}},
+		{ID: "num copies", Values: []string{"1"}},
+	}}
+	count := 0
+	for _, group := range GroupedOptions(model) {
+		for _, option := range group.Options {
+			if option.ID == "EFCopies" || option.ID == "num copies" {
+				count++
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("copies options displayed %d times, want 1", count)
 	}
 }
 

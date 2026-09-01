@@ -1,7 +1,7 @@
 package capabilities
 
-// Model is the normalized capability set used by the UI. It intentionally
-// hides raw Fiery response shape from Windigo controls.
+// Model is the normalized capability set used by the desktop UI. It hides the
+// raw Fiery response shape from presentation and automation code.
 type Model struct {
 	ServerName   string
 	SerialNumber string
