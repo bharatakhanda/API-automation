@@ -11,9 +11,9 @@ This document captures durable project rules and discussion points for quick ret
 ## Technology stack
 
 - Language: Go
-- Desktop UI: Windigo (`github.com/rodrigocfd/windigo`)
-- Target platform: Windows desktop application
-- GUI threading rule: lock the main goroutine to the OS thread with `runtime.LockOSThread()`.
+- Desktop UI: Gio (`gioui.org`), with Windigo used only for native Windows dialogs.
+- Target platform: Windows desktop application.
+- GUI threading rule: run Gio through `app.Main`; protect background state with synchronization and request redraws with `Window.Invalidate`.
 
 ## Engineering expectations
 
@@ -40,18 +40,27 @@ The application must be:
 - Use concurrency where it improves responsiveness or throughput.
 - Never block the UI thread with network calls or long-running automation.
 - Use controlled concurrency, not unbounded goroutine spawning.
-- Prefer worker-pool style execution for workflows and batch runs.
+- Prefer worker-pool style execution for workflows and batch runs; accept 1 through 1000 parallel jobs while retaining explicit cancellation and bounded case generation.
 - Reuse HTTP clients and transports for connection pooling.
 - Add tests for core execution and runner behavior.
 - Treat errors as first-class output; expose them clearly in execution results and logs.
+- Excel exports must include a non-secret run summary and a results sheet with fixed Job ID, Job Name, and Result columns followed by dynamic paired Set/Get attribute columns.
+- Never export passwords, API keys, session cookies, or other authentication material.
 
 ## UI and UX rules
 
 - Design the UI as a modern enterprise desktop application.
 - Favor a workspace-oriented layout with clear navigation and primary actions.
-- Keep status, results, and activity logs visible during execution.
+- Keep status visible and make results and activity logs easy to access from separate workspace pages during execution.
+- Show a visible, draggable vertical scrollbar whenever workspace content exceeds the available height.
+- Display every server-advertised value under its capability heading; do not impose an arbitrary UI-only value cap.
+- Provide Select all at both the category and individual capability heading levels. Reset must clear checkbox selections and restore automation controls while preserving connection details, discovery data, and file paths.
+- Treat Copies as a validated numeric capability input from 1 through 9999: comma-separated entries become generation-axis values, one entry applies to every generated job, and inclusive ranges are expanded and randomized within the independently configured Max cases limit. Copies input must never modify Max cases.
+- Keep run cancellation, Fiery job cancellation, and permanent job deletion distinct. Manual job cancel may proceed only for processing/ripping, waiting-to-print, or printing states; manual delete may target any state and must require explicit confirmation.
+- Cancel-while-Processing/Ripping, Cancel-while-Waiting-to-Print, Cancel-while-Printing, and Delete automation modes must use separate imported jobs and condition-based state waits. Delete must remove only its dedicated test job.
+- GUI shutdown must cancel the root application context, stop accepting background work, wait only for a bounded interval, and avoid long blocking result-file synchronization.
 - Preserve UI responsiveness during automation runs.
-- Marshal background updates onto the Windigo UI thread with `wnd.UiThread`.
+- Keep widget mutation on the Gio event goroutine; synchronize shared background state and call `Window.Invalidate` after updates.
 - Prefer clean spacing, predictable labels, and operational clarity over decorative complexity.
 - Current UX direction is documented in `docs/ux.md`.
 
@@ -110,16 +119,15 @@ The temporary `DATA/` folder is reference-only and must never be committed. It c
 Useful behavior incorporated into the Go application:
 
 - Fiery server base URL: `https://{server}`.
-- Use only Fiery API v5 for newly implemented server calls.
+- Prefer Fiery API v5 for newly implemented server calls while retaining deliberate v4 compatibility fallbacks where current servers require them.
 - Login endpoint: `POST /live/api/v5/login`.
-- Login payload uses `username`, `password`, and `accessrights` where `accessrights` maps to the user-provided secret key.
+- Login payload uses `username`, `password`, and the user-provided secret/API key. Fiery v5 requires the JSON field `apikey`; only the v4 compatibility fallback uses the legacy field `accessrights`. A v5 request using `accessrights` may return HTTP 200 and a cookie but creates a restricted session that exposes only compact job data.
 - Do not hardcode credentials from the temporary `DATA/` folder into source code.
 - The server returns an authenticated session cookie via `Set-Cookie`.
 - Test files are imported as jobs with multipart upload to `POST /live/api/v5/jobs`.
 - Import form fields:
   - `file`: selected test file.
-  - `queue`: selected run-mode queue, currently `hold` for hold/process flows and `print` for print flow.
-- Keep-alive/status check uses `GET /live/api/v5/info`, matching the v5 import reference flow.
+  - `queue`: selected run-mode queue; current lifecycle modes import into `hold` and then perform explicit actions.
 - Capability capture includes `GET /live/api/v5/info` and saves snapshots next to the EXE under `captures/server-capabilities-snapshot-YYYYMMDD-HHMMSS.json`.
 - Snapshot files must not include the secret key, password, or session cookie.
 - Fiery installations may use self-signed certificates, so the server client supports controlled insecure TLS for this environment.
@@ -127,12 +135,11 @@ Useful behavior incorporated into the Go application:
   - Hold: import to hold queue only.
   - Process and Hold: import to hold, then `rip`.
   - RIP: import to hold, then `rip`.
-  - Press Print: import to hold, then `press_print`.
-  - Ready to Print: import to hold, then `press_print`.
-  - Print: import to print queue, then `print`.
-- Job operation endpoints available for workflow steps should use v5 first with v4 fallback, for example:
-  - `PUT /live/api/v5/jobs/{jobId}/rip`
-  - `PUT /live/api/v5/jobs/{jobId}/press_print`
-  - `PUT /live/api/v5/jobs/{jobId}/print`
-  - `DELETE /live/api/v5/jobs/{jobId}`
-  - `POST /live/api/v5/jobs/{jobId}` for attribute updates.
+  - Press Print: import to hold, then RIP, move to production, and `press_print`.
+  - Ready to Print: import to hold, then RIP and move to production.
+  - Print: import to hold, then RIP, move to production, `press_print`, and `print`.
+- Job operation endpoints use the proven v4 operation first with v5 compatibility fallback:
+  - `PUT /live/api/v{4|5}/jobs/{jobId}/rip`
+  - `PUT /live/api/v{4|5}/jobs/{jobId}/press_print`
+  - `PUT /live/api/v{4|5}/jobs/{jobId}/print`
+  - `POST /live/api/v{4|5}/jobs/{jobId}` for attribute updates.

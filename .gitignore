@@ -1,8 +1,12 @@
 bin/
 dist/
 DATA/
+.local/
+SECRET_KEY.local.txt
+secrets.json
 server-capabilities-snapshot-*.json
 EnvironmentSnapshot-*.json
+api-automation-results-*.xlsx
 captures/
 logs/
 *.exe
