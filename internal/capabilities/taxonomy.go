@@ -21,15 +21,15 @@ type OptionGroup struct {
 }
 
 type ConstraintConflict struct {
-	OptionID         string
-	SelectedValue    string
-	DependencyID     string
-	DependencyValue  string
-	CompatibleValues []string
+	OptionID          string
+	SelectedValue     string
+	DependencyID      string
+	DependencyValue   string
+	ConflictingValues []string
 }
 
 func (c ConstraintConflict) Error() string {
-	return fmt.Sprintf("%s=%q requires %s to be one of [%s], got %q", c.OptionID, c.SelectedValue, c.DependencyID, strings.Join(c.CompatibleValues, ", "), c.DependencyValue)
+	return fmt.Sprintf("%s=%q conflicts with %s=%q (published incompatible values: [%s])", c.OptionID, c.SelectedValue, c.DependencyID, c.DependencyValue, strings.Join(c.ConflictingValues, ", "))
 }
 
 var categoryOrder = []string{
@@ -344,20 +344,20 @@ func ValidateCombination(model Model, combination map[string]string) []Constrain
 			continue
 		}
 		dependencies := option.Constraints[selectedValue]
-		for dependencyID, compatibleValues := range dependencies {
+		for dependencyID, incompatibleValues := range dependencies {
 			dependencyValue, explicitlySelected := combination[dependencyID]
 			if !explicitlySelected {
 				// Defaults and hidden job-ticket values are checked against the
 				// imported job by Fiery's job constraint endpoint at execution time.
 				continue
 			}
-			if containsFold(compatibleValues, dependencyValue) {
+			if !containsFold(incompatibleValues, dependencyValue) {
 				continue
 			}
 			conflicts = append(conflicts, ConstraintConflict{
 				OptionID: optionID, SelectedValue: selectedValue,
 				DependencyID: dependencyID, DependencyValue: dependencyValue,
-				CompatibleValues: append([]string(nil), compatibleValues...),
+				ConflictingValues: append([]string(nil), incompatibleValues...),
 			})
 		}
 	}
@@ -418,6 +418,25 @@ func optionAlias(id string) string {
 		return "edge-enhancement"
 	}
 	return id
+}
+
+// documentedCWSJobProperty is a necessary, but not sufficient, condition for
+// rendering a property. The supplied Antares/Capella/Vela Job Properties
+// taxonomy prevents backend-only schema controls from leaking into the UI;
+// normal metadata eligibility checks still decide whether a documented control
+// is actually supported by the connected server.
+func documentedCWSJobProperty(id string) bool {
+	if _, ok := canonicalLabels[id]; ok {
+		return true
+	}
+	if _, ok := directSectionOptions[id]; ok {
+		return true
+	}
+	if _, ok := sectionByOption[id]; ok {
+		return true
+	}
+	_, ok := optionOrder[id]
+	return ok
 }
 
 func categoryForOption(option Option) string {
