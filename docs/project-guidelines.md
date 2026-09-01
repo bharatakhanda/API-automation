@@ -44,7 +44,7 @@ The application must be:
 - Reuse HTTP clients and transports for connection pooling.
 - Add tests for core execution and runner behavior.
 - Treat errors as first-class output; expose them clearly in execution results and logs.
-- Excel exports must include a non-secret run summary and a results sheet with fixed Job ID, Job Name, and Result columns followed by dynamic paired Set/Get attribute columns.
+- Excel exports must include a non-secret run summary and a results sheet with fixed Job ID, Job Name, Result, mode, final job status/state/error, and lifecycle-verification columns followed by dynamic paired Set/Get attribute columns.
 - Never export passwords, API keys, session cookies, or other authentication material.
 
 ## UI and UX rules
@@ -53,11 +53,17 @@ The application must be:
 - Favor a workspace-oriented layout with clear navigation and primary actions.
 - Keep status visible and make results and activity logs easy to access from separate workspace pages during execution.
 - Show a visible, draggable vertical scrollbar whenever workspace content exceeds the available height.
-- Display every server-advertised value under its capability heading; do not impose an arbitrary UI-only value cap.
-- Provide Select all at both the category and individual capability heading levels. Reset must clear checkbox selections and restore automation controls while preserving connection details, discovery data, and file paths.
+- Organize discovered features into focused category tabs (Job info, Layout, Substrate, Color and Image, Finishing, VDP, Installable options, and Other/Advanced) and display every server-advertised value within its capability; do not impose an arbitrary UI-only value cap.
+- Provide feature search across labels, API keys, categories, defaults, and advertised values.
+- Provide Select all at both the category and individual capability heading levels. Reset must clear checkbox and numeric selections and restore automation controls while preserving connection details, discovery data, file paths, and saved presets.
+- Render Fiery `efirange` properties from their server-provided min/max/increment/precision metadata. Numeric inputs may contain one value, comma-separated values, or inclusive ranges and must be bounded before combination generation.
+- Keep optional Scale input unset by default and send it only when the user enters a validated value; the imported job and Fiery server remain authoritative for support.
+- Save local reusable setting presets atomically under the user's configuration directory. Presets may contain feature selections, numeric inputs, strategy, worker/case limits, file-selection mode, and run modes, but never credentials, cookies, or file paths. Validate restored values against current discovery.
 - Treat Copies as a validated numeric capability input from 1 through 9999: comma-separated entries become generation-axis values, one entry applies to every generated job, and inclusive ranges are expanded and randomized within the independently configured Max cases limit. Copies input must never modify Max cases.
 - Keep run cancellation, Fiery job cancellation, and permanent job deletion distinct. Manual job cancel may proceed only for processing/ripping, waiting-to-print, or printing states; manual delete may target any state and must require explicit confirmation.
 - Cancel-while-Processing/Ripping, Cancel-while-Waiting-to-Print, Cancel-while-Printing, and Delete automation modes must use separate imported jobs and condition-based state waits. Delete must remove only its dedicated test job.
+- Process and Hold/RIP results must not pass solely because Set equals Get. After processing, require successful Fiery status/state and raster/page evidence, and fail on error, PDL error, canceled/aborted processing, unsupported PDL, or missing expected raster evidence.
+- Apply discovered constraints in two stages: filter combinations only when selected values explicitly contradict published compatibility metadata, then ask the imported job's Fiery constraint endpoint before updating constrained settings when supported. Cache endpoint unavailability and keep the attribute-update response authoritative on older servers.
 - GUI shutdown must cancel the root application context, stop accepting background work, wait only for a bounded interval, and avoid long blocking result-file synchronization.
 - Preserve UI responsiveness during automation runs.
 - Keep widget mutation on the Gio event goroutine; synchronize shared background state and call `Window.Invalidate` after updates.

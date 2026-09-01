@@ -11,9 +11,14 @@ Windows desktop automation for Fiery job import, lifecycle execution, attribute 
 - Uses configurable worker concurrency from 1 through 1000, cancellation, condition-based polling, and final set/get verification.
 - Saves diagnostics and API/capability snapshots beside the executable under `logs/` and `captures/`.
 - Provides visible vertical scrolling for long workspace pages and exports completed runs to formatted `.xlsx` workbooks with Summary and Results sheets.
-- Provides header Reset plus category-level and capability-level Select all controls for discovered checkbox values.
+- Organizes discovered features into Job info, Layout, Substrate, Color and Image, Finishing, VDP, Installable, and Advanced tabs instead of rendering one full capability catalog at once.
+- Provides feature search plus header Reset and category/capability-level Select all controls for discovered checkbox values.
+- Renders Fiery `efirange` properties as validated numeric inputs using server min/max/increment/precision metadata, provides optional Scale input, and accepts single values, comma-separated values, or inclusive ranges.
 - Accepts Copies as individual values or inclusive ranges from 1 through 9999 and feeds them into selected, permutation, and pairwise generation while respecting Max cases.
+- Saves reusable local settings presets without credentials or file paths and validates restored values against the currently connected Fiery.
+- Filters explicit local conflicts using discovered constraint metadata and performs a cached, job-specific Fiery constraint check before applying constrained settings when the endpoint is supported.
 - Provides confirmed manual job actions plus separate Cancel-while-Processing/Ripping, Cancel-while-Waiting-to-Print, Cancel-while-Printing, and Delete automation modes; each selected mode imports its own job.
+- Evaluates Process-and-Hold/RIP success from final Fiery status, state, error, and raster/page evidence in addition to strict set/get matching; lifecycle failures remain failures even when ticket values match.
 - Coordinates GUI shutdown with background cancellation and bounded waiting, and finalizes long-run result files without a blocking full-file sync.
 - Keeps all normal GUI HTTP work in-process; the standalone readback probe alone may invoke curl for diagnostics.
 
