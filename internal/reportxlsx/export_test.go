@@ -17,7 +17,7 @@ func TestExportCreatesSummaryAndDynamicSetGetColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	results := []Result{
-		{JobID: "JOB-1", JobName: "first.pdf", Result: "PASS", DurationMS: 1200, SetValues: map[string]string{"EFResolution": "360x720dpi"}, GetValues: map[string]string{"EFResolution": "360x720dpi"}},
+		{JobID: "JOB-1", JobName: "first.pdf", Result: "PASS", Mode: "Process and Hold", JobStatus: "done ripping", JobState: "processed", Lifecycle: "processed with raster", DurationMS: 1200, SetValues: map[string]string{"EFResolution": "360x720dpi"}, GetValues: map[string]string{"EFResolution": "360x720dpi"}},
 		{JobID: "JOB-2", JobName: "second.pdf", Result: "FAIL", DurationMS: 800, SetValues: map[string]string{"EFResolution": "360x720dpi"}, GetValues: map[string]string{"EFResolution": "360x360dpi"}},
 	}
 	for _, result := range results {
@@ -73,14 +73,21 @@ func TestExportCreatesSummaryAndDynamicSetGetColumns(t *testing.T) {
 	assertCell(t, workbook, "Results", "A1", "Job ID")
 	assertCell(t, workbook, "Results", "B1", "Job Name")
 	assertCell(t, workbook, "Results", "C1", "Result")
-	assertCell(t, workbook, "Results", "D1", "Resolution")
-	assertCell(t, workbook, "Results", "D2", "Set Value")
-	assertCell(t, workbook, "Results", "E2", "Get Value")
+	assertCell(t, workbook, "Results", "D1", "Mode")
+	assertCell(t, workbook, "Results", "E1", "Job Status")
+	assertCell(t, workbook, "Results", "F1", "Job State")
+	assertCell(t, workbook, "Results", "H1", "Lifecycle Verification")
+	assertCell(t, workbook, "Results", "I1", "Resolution")
+	assertCell(t, workbook, "Results", "I2", "Set Value")
+	assertCell(t, workbook, "Results", "J2", "Get Value")
 	assertCell(t, workbook, "Results", "A3", "JOB-1")
 	assertCell(t, workbook, "Results", "B3", "first.pdf")
 	assertCell(t, workbook, "Results", "C3", "PASS")
-	assertCell(t, workbook, "Results", "D4", "360x720dpi")
-	assertCell(t, workbook, "Results", "E4", "360x360dpi")
+	assertCell(t, workbook, "Results", "D3", "Process and Hold")
+	assertCell(t, workbook, "Results", "E3", "done ripping")
+	assertCell(t, workbook, "Results", "F3", "processed")
+	assertCell(t, workbook, "Results", "I4", "360x720dpi")
+	assertCell(t, workbook, "Results", "J4", "360x360dpi")
 }
 
 func TestResultStoreSupportsConcurrentWriters(t *testing.T) {

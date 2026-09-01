@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	excelMaxRows     = 1_048_576
-	excelMaxColumns  = 16_384
-	resultHeaderRows = 2
+	excelMaxRows       = 1_048_576
+	excelMaxColumns    = 16_384
+	resultHeaderRows   = 2
+	fixedResultColumns = 8
 )
 
 type Report struct {
@@ -57,7 +58,7 @@ func Export(path string, report Report) (Stats, error) {
 	if stats.Total > excelMaxRows-resultHeaderRows {
 		return Stats{}, fmt.Errorf("result count %d exceeds Excel's maximum of %d data rows", stats.Total, excelMaxRows-resultHeaderRows)
 	}
-	if 3+2*len(attributes) > excelMaxColumns {
+	if fixedResultColumns+2*len(attributes) > excelMaxColumns {
 		return Stats{}, fmt.Errorf("attribute count %d exceeds Excel's column limit", len(attributes))
 	}
 
@@ -248,7 +249,8 @@ func writeSummarySheet(workbook *excelize.File, summary Summary, stats Stats, st
 		{"Failed", stats.Failed},
 		{"Errors", stats.Errors},
 		{"Pass rate", passRate(stats)},
-		{"Verification note", "Each dynamic attribute in Results has adjacent Set Value and Get Value columns. Fiery may omit attributes that equal the discovered server default; the application accounts for that when determining PASS."},
+		{"Constraint-conflicting combinations skipped", summary.ConstraintSkipped},
+		{"Verification note", "PASS requires the selected lifecycle outcome as well as strict attribute verification when attributes are selected. Process and Hold/RIP also require successful status/state and raster/page evidence. Fiery may omit attributes that equal the discovered server default; the application accounts for that."},
 		{"Security note", "Passwords, API keys, and session cookies are not exported."},
 	}
 	for index, row := range rows {
@@ -289,22 +291,34 @@ func writeResultsSheet(workbook *excelize.File, resultsPath string, attributes [
 	if err := stream.SetColWidth(3, 3, 14); err != nil {
 		return err
 	}
+	if err := stream.SetColWidth(4, 4, 24); err != nil {
+		return err
+	}
+	if err := stream.SetColWidth(5, 6, 20); err != nil {
+		return err
+	}
+	if err := stream.SetColWidth(7, 7, 30); err != nil {
+		return err
+	}
+	if err := stream.SetColWidth(8, 8, 52); err != nil {
+		return err
+	}
 	if len(attributes) > 0 {
-		if err := stream.SetColWidth(4, 3+2*len(attributes), 24); err != nil {
+		if err := stream.SetColWidth(fixedResultColumns+1, fixedResultColumns+2*len(attributes), 24); err != nil {
 			return err
 		}
 	}
-	if err := stream.SetPanes(&excelize.Panes{Freeze: true, XSplit: 3, YSplit: 2, TopLeftCell: "D3", ActivePane: "bottomRight"}); err != nil {
+	if err := stream.SetPanes(&excelize.Panes{Freeze: true, XSplit: fixedResultColumns, YSplit: 2, TopLeftCell: "I3", ActivePane: "bottomRight"}); err != nil {
 		return err
 	}
-	for column := 1; column <= 3; column++ {
+	for column := 1; column <= fixedResultColumns; column++ {
 		name, _ := excelize.ColumnNumberToName(column)
 		if err := stream.MergeCell(name+"1", name+"2"); err != nil {
 			return err
 		}
 	}
 	for index := range attributes {
-		startColumn := 4 + index*2
+		startColumn := fixedResultColumns + 1 + index*2
 		startName, _ := excelize.ColumnNumberToName(startColumn)
 		endName, _ := excelize.ColumnNumberToName(startColumn + 1)
 		if err := stream.MergeCell(startName+"1", endName+"1"); err != nil {
@@ -312,13 +326,18 @@ func writeResultsSheet(workbook *excelize.File, resultsPath string, attributes [
 		}
 	}
 
-	header := make([]interface{}, 3+2*len(attributes))
+	header := make([]interface{}, fixedResultColumns+2*len(attributes))
 	header[0] = excelize.Cell{StyleID: styles.header, Value: "Job ID"}
 	header[1] = excelize.Cell{StyleID: styles.header, Value: "Job Name"}
 	header[2] = excelize.Cell{StyleID: styles.header, Value: "Result"}
+	header[3] = excelize.Cell{StyleID: styles.header, Value: "Mode"}
+	header[4] = excelize.Cell{StyleID: styles.header, Value: "Job Status"}
+	header[5] = excelize.Cell{StyleID: styles.header, Value: "Job State"}
+	header[6] = excelize.Cell{StyleID: styles.header, Value: "Job Error"}
+	header[7] = excelize.Cell{StyleID: styles.header, Value: "Lifecycle Verification"}
 	subheader := make([]interface{}, len(header))
 	for index, attribute := range attributes {
-		column := 3 + index*2
+		column := fixedResultColumns + index*2
 		header[column] = excelize.Cell{StyleID: styles.header, Value: attribute.Label}
 		header[column+1] = excelize.Cell{StyleID: styles.header, Value: ""}
 		subheader[column] = excelize.Cell{StyleID: styles.subheader, Value: "Set Value"}
@@ -333,7 +352,7 @@ func writeResultsSheet(workbook *excelize.File, resultsPath string, attributes [
 
 	rowNumber := 3
 	if err := forEachResult(resultsPath, func(result Result) error {
-		row := make([]interface{}, 3+2*len(attributes))
+		row := make([]interface{}, fixedResultColumns+2*len(attributes))
 		row[0] = result.JobID
 		row[1] = result.JobName
 		status := strings.ToUpper(strings.TrimSpace(result.Result))
@@ -346,8 +365,13 @@ func writeResultsSheet(workbook *excelize.File, resultsPath string, attributes [
 			status = "ERROR"
 		}
 		row[2] = excelize.Cell{StyleID: statusStyle, Value: status}
+		row[3] = result.Mode
+		row[4] = result.JobStatus
+		row[5] = result.JobState
+		row[6] = result.JobError
+		row[7] = result.Lifecycle
 		for index, attribute := range attributes {
-			column := 3 + index*2
+			column := fixedResultColumns + index*2
 			setValue := result.SetValues[attribute.ID]
 			getValue := result.GetValues[attribute.ID]
 			if status == "FAIL" && setValue != getValue {

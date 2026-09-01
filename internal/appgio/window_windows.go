@@ -26,8 +26,11 @@ import (
 	"api-automation/internal/copyvalues"
 	"api-automation/internal/fiery"
 	"api-automation/internal/files"
+	"api-automation/internal/joboutcome"
 	"api-automation/internal/model"
 	"api-automation/internal/preflight"
+	"api-automation/internal/presets"
+	"api-automation/internal/rangevalues"
 	"api-automation/internal/reportxlsx"
 
 	"gioui.org/app"
@@ -86,50 +89,59 @@ type Window struct {
 	folderPath, filePath          widget.Editor
 	workers, maxCases             widget.Editor
 	copiesInput, jobActionID      widget.Editor
+	capabilitySearch, presetName  widget.Editor
 
-	captureButton, runButton, cancelButton, resetButton widget.Clickable
-	testServerButton, apiTraceButton, exportButton      widget.Clickable
-	cancelJobButton, deleteJobButton                    widget.Clickable
-	browseFolderButton, browseFileButton                widget.Clickable
-	navButtons                                          []widget.Clickable
-	selectedOnlyButton, allPermButton, pairwiseButton   widget.Clickable
-	modeChecks                                          []widget.Bool
-	fileModeGroup                                       widget.Enum
+	captureButton, runButton, cancelButton, resetButton    widget.Clickable
+	testServerButton, apiTraceButton, exportButton         widget.Clickable
+	cancelJobButton, deleteJobButton                       widget.Clickable
+	savePresetButton, loadPresetButton, deletePresetButton widget.Clickable
+	browseFolderButton, browseFileButton                   widget.Clickable
+	navButtons                                             []widget.Clickable
+	selectedOnlyButton, allPermButton, pairwiseButton      widget.Clickable
+	modeChecks                                             []widget.Bool
+	fileModeGroup                                          widget.Enum
 
 	activePage int
 	strategy   combinations.Strategy
 
-	capabilities     capabilities.Model
-	selected         map[string]map[string]*widget.Bool
-	groupChecks      map[string]*widget.Bool
-	optionChecks     map[string]*widget.Bool
-	mu               sync.Mutex
-	backgroundMu     sync.Mutex
-	backgroundWG     sync.WaitGroup
-	appContext       context.Context
-	appCancel        context.CancelFunc
-	closing          atomic.Bool
-	log              []string
-	logCount         int
-	results          []resultRow
-	resultCount      int
-	status           string
-	serverTestStatus string
-	captureActive    bool
-	captureProgress  float32
-	capturePhase     string
-	running          atomic.Bool
-	testingServer    atomic.Bool
-	exportingResults atomic.Bool
-	managingJob      atomic.Bool
-	cancel           context.CancelFunc
-	diagnostic       *diagnosticLog
-	resultStore      *reportxlsx.ResultStore
-	resultStoreError string
-	lastRun          reportxlsx.Summary
+	capabilities          capabilities.Model
+	selected              map[string]map[string]*widget.Bool
+	groupChecks           map[string]*widget.Bool
+	optionChecks          map[string]*widget.Bool
+	numericInputs         map[string]*widget.Editor
+	categoryButtons       map[string]*widget.Clickable
+	activeCapabilityGroup string
+	presetStore           *presets.Store
+	presetList            []presets.Preset
+	constraintSkipped     int
+	constraintWarning     string
+	mu                    sync.Mutex
+	backgroundMu          sync.Mutex
+	backgroundWG          sync.WaitGroup
+	appContext            context.Context
+	appCancel             context.CancelFunc
+	closing               atomic.Bool
+	log                   []string
+	logCount              int
+	results               []resultRow
+	resultCount           int
+	status                string
+	serverTestStatus      string
+	captureActive         bool
+	captureProgress       float32
+	capturePhase          string
+	running               atomic.Bool
+	testingServer         atomic.Bool
+	exportingResults      atomic.Bool
+	managingJob           atomic.Bool
+	cancel                context.CancelFunc
+	diagnostic            *diagnosticLog
+	resultStore           *reportxlsx.ResultStore
+	resultStoreError      string
+	lastRun               reportxlsx.Summary
 }
 
-type resultRow struct{ JobID, JobName, Result, Duration, Detail string }
+type resultRow struct{ JobID, JobName, Result, Duration, Status, State, Detail string }
 
 type workspacePage struct {
 	NavigationLabel string
@@ -162,6 +174,7 @@ type apiTraceReport struct {
 	Import         fiery.ImportResult `json:"import"`
 	Stages         []apiTraceStage    `json:"stages"`
 	Final          map[string]string  `json:"finalAttributes,omitempty"`
+	Lifecycle      string             `json:"lifecycle,omitempty"`
 	Result         string             `json:"result"`
 	Error          string             `json:"error,omitempty"`
 }
@@ -170,6 +183,13 @@ type runMode struct {
 	Label, ImportQueue string
 	Actions            []string
 }
+
+type lifecycleFailure struct {
+	outcome joboutcome.Outcome
+	attrs   map[string]string
+}
+
+func (e *lifecycleFailure) Error() string { return e.outcome.Summary() }
 
 var runModes = []runMode{
 	{Label: "Hold", ImportQueue: "hold"},
@@ -186,7 +206,14 @@ var runModes = []runMode{
 
 func New() *Window {
 	appContext, appCancel := context.WithCancel(context.Background())
-	w := &Window{window: new(app.Window), theme: material.NewTheme(), selected: map[string]map[string]*widget.Bool{}, groupChecks: map[string]*widget.Bool{}, optionChecks: map[string]*widget.Bool{}, strategy: combinations.StrategySelected, status: "Ready · Open Settings, discover capabilities, then run automation.", diagnostic: newDiagnosticLog(), appContext: appContext, appCancel: appCancel}
+	w := &Window{
+		window: new(app.Window), theme: material.NewTheme(),
+		selected: map[string]map[string]*widget.Bool{}, groupChecks: map[string]*widget.Bool{}, optionChecks: map[string]*widget.Bool{},
+		numericInputs: map[string]*widget.Editor{}, categoryButtons: map[string]*widget.Clickable{},
+		strategy: combinations.StrategySelected, activeCapabilityGroup: "Job info",
+		status: "Ready · Open Settings, discover capabilities, then run automation.", diagnostic: newDiagnosticLog(),
+		appContext: appContext, appCancel: appCancel,
+	}
 	w.theme.Palette = material.Palette{Bg: palette.bg, Fg: palette.text, ContrastBg: palette.primary, ContrastFg: rgb(0xffffff)}
 	w.theme.TextSize = 15
 	w.list.Axis = layout.Vertical
@@ -201,6 +228,14 @@ func New() *Window {
 	initEditor(&w.maxCases, "100")
 	initEditor(&w.copiesInput, "1")
 	initEditor(&w.jobActionID, "")
+	initEditor(&w.capabilitySearch, "")
+	initEditor(&w.presetName, "")
+	if presetPath, err := presets.DefaultPath(); err == nil {
+		if store, storeErr := presets.New(presetPath); storeErr == nil {
+			w.presetStore = store
+			w.presetList, _ = store.List()
+		}
+	}
 	w.fileModeGroup.Value = "all"
 	w.modeChecks = make([]widget.Bool, len(runModes))
 	if len(w.modeChecks) > 0 {
@@ -340,6 +375,22 @@ func (w *Window) handleClicks(gtx layout.Context) {
 	for w.apiTraceButton.Clicked(gtx) {
 		w.startAPITrace()
 	}
+	for w.savePresetButton.Clicked(gtx) {
+		w.saveCurrentPreset()
+	}
+	for w.loadPresetButton.Clicked(gtx) {
+		w.loadNamedPreset()
+	}
+	for w.deletePresetButton.Clicked(gtx) {
+		w.deleteNamedPreset()
+	}
+	for name, button := range w.categoryButtons {
+		for button.Clicked(gtx) {
+			w.activeCapabilityGroup = name
+			w.capabilitySearch.SetText("")
+			w.list.Position = layout.Position{}
+		}
+	}
 	for w.testServerButton.Clicked(gtx) {
 		w.testServerConnection()
 	}
@@ -408,6 +459,11 @@ func (w *Window) resetSelections() {
 	}
 	w.strategy = combinations.StrategySelected
 	w.copiesInput.SetText("1")
+	for _, input := range w.numericInputs {
+		input.SetText("")
+	}
+	w.capabilitySearch.SetText("")
+	w.activeCapabilityGroup = "Job info"
 	w.workers.SetText("1")
 	w.maxCases.SetText(strconv.Itoa(defaultCaseLimit))
 	w.fileModeGroup.Value = "all"
@@ -633,7 +689,13 @@ func (w *Window) capabilitiesCard(gtx layout.Context) layout.Dimensions {
 		if active {
 			children = append(children, layout.Rigid(w.captureProgressPanel), layout.Rigid(spacer(10)))
 		}
-		children = append(children, layout.Rigid(w.strategySelector), layout.Rigid(spacer(12)), layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionGrid(gtx, model) }))
+		children = append(children,
+			layout.Rigid(w.capabilityToolbar), layout.Rigid(spacer(10)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.categoryTabs(gtx, model) }), layout.Rigid(spacer(10)),
+			layout.Rigid(w.presetPanel), layout.Rigid(spacer(10)),
+			layout.Rigid(w.strategySelector), layout.Rigid(spacer(12)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionGrid(gtx, model) }),
+		)
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 	})
 }
@@ -656,16 +718,112 @@ func (w *Window) captureProgressPanel(gtx layout.Context) layout.Dimensions {
 	})
 }
 
+func (w *Window) capabilityToolbar(gtx layout.Context) layout.Dimensions {
+	return layout.Flex{Alignment: layout.End}.Layout(gtx,
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return fieldBox(w.theme, "Search features", "Search by feature name, API key, value, or category", &w.capabilitySearch, 620)(gtx)
+		}),
+		layout.Rigid(spacerX(12)),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			w.mu.Lock()
+			model := w.capabilities
+			w.mu.Unlock()
+			return label(w.theme, fmt.Sprintf("%d features · %d constrained", len(model.Options), capabilities.ConstraintCount(model)), 13, palette.muted).Layout(gtx)
+		}),
+	)
+}
+
+func (w *Window) categoryTabs(gtx layout.Context, model capabilities.Model) layout.Dimensions {
+	names := capabilities.CategoryNames(model)
+	if len(names) == 0 {
+		return layout.Dimensions{}
+	}
+	available := false
+	for _, name := range names {
+		if name == w.activeCapabilityGroup {
+			available = true
+			break
+		}
+	}
+	if !available {
+		w.activeCapabilityGroup = names[0]
+	}
+	children := make([]layout.FlexChild, 0, len(names))
+	for _, name := range names {
+		name := name
+		button := w.categoryButton(name)
+		shortName := strings.TrimSuffix(strings.TrimSuffix(name, " options"), " / Advanced")
+		children = append(children, layout.Flexed(1, toggle(w.theme, button, shortName, w.activeCapabilityGroup == name)))
+	}
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
+}
+
+func (w *Window) categoryButton(name string) *widget.Clickable {
+	if w.categoryButtons[name] == nil {
+		w.categoryButtons[name] = new(widget.Clickable)
+	}
+	return w.categoryButtons[name]
+}
+
+func (w *Window) presetPanel(gtx layout.Context) layout.Dimensions {
+	names := make([]string, 0, len(w.presetList))
+	for _, preset := range w.presetList {
+		names = append(names, preset.Name)
+	}
+	available := "No saved presets"
+	if len(names) > 0 {
+		available = "Saved: " + strings.Join(names, " · ")
+	}
+	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(label(w.theme, "Reusable settings preset", 15, palette.text).Layout),
+			layout.Rigid(spacer(3)),
+			layout.Rigid(label(w.theme, "Presets save selections, numeric inputs, strategy, workers, and run modes. Credentials and file paths are never saved.", 12, palette.muted).Layout),
+			layout.Rigid(spacer(7)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return row(gtx,
+					field(w.theme, "Preset name", &w.presetName, 360),
+					secondaryButton(w.theme, &w.savePresetButton, "Save"),
+					secondaryButton(w.theme, &w.loadPresetButton, "Load"),
+					dangerButton(w.theme, &w.deletePresetButton, "Delete"),
+				)
+			}),
+			layout.Rigid(spacer(5)),
+			layout.Rigid(label(w.theme, available, 12, palette.muted).Layout),
+		)
+	})
+}
+
 func (w *Window) strategySelector(gtx layout.Context) layout.Dimensions {
 	return row(gtx, toggle(w.theme, &w.selectedOnlyButton, "Selected only", w.strategy == combinations.StrategySelected), toggle(w.theme, &w.allPermButton, "All permutations", w.strategy == combinations.StrategyAll), toggle(w.theme, &w.pairwiseButton, "Pairwise", w.strategy == combinations.StrategyPairwise), field(w.theme, "Max cases", &w.maxCases, 110), browseButton(w.theme, &w.apiTraceButton, "Capture API trace"))
 }
 
 func (w *Window) optionGrid(gtx layout.Context, model capabilities.Model) layout.Dimensions {
-	groups := capabilities.GroupedOptions(model)
-	children := []layout.FlexChild{layout.Rigid(w.queueGroup(model))}
-	for _, group := range groups {
+	query := strings.TrimSpace(w.capabilitySearch.Text())
+	groups := capabilities.FilteredGroups(model, query)
+	if query == "" {
+		filtered := groups[:0]
+		for _, group := range groups {
+			if group.Name == w.activeCapabilityGroup {
+				filtered = append(filtered, group)
+				break
+			}
+		}
+		groups = filtered
+	}
+	if len(groups) == 0 {
+		return formPanel(gtx, label(w.theme, "No features match the current search.", 14, palette.muted).Layout)
+	}
+	children := make([]layout.FlexChild, 0, len(groups)*2+1)
+	if query == "" && w.activeCapabilityGroup == "Job info" {
+		children = append(children, layout.Rigid(w.queueGroup(model)), layout.Rigid(spacer(12)))
+	}
+	for index, group := range groups {
 		g := group
-		children = append(children, layout.Rigid(spacer(14)), layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.capabilityGroup(gtx, g) }))
+		if index > 0 {
+			children = append(children, layout.Rigid(spacer(12)))
+		}
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.capabilityGroup(gtx, g) }))
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
@@ -736,7 +894,7 @@ func (w *Window) groupSelectionState(group capabilities.OptionGroup) (bool, int)
 	allSelected := true
 	selectableCount := 0
 	for _, option := range group.Options {
-		if isCopiesOption(option.ID) {
+		if isCopiesOption(option.ID) || option.Range != nil {
 			continue
 		}
 		values := optionValues(option)
@@ -753,7 +911,7 @@ func (w *Window) groupSelectionState(group capabilities.OptionGroup) (bool, int)
 
 func (w *Window) setGroupSelection(group capabilities.OptionGroup, selected bool) {
 	for _, option := range group.Options {
-		if isCopiesOption(option.ID) {
+		if isCopiesOption(option.ID) || option.Range != nil {
 			continue
 		}
 		values := optionValues(option)
@@ -772,6 +930,9 @@ func (w *Window) optionRow(gtx layout.Context, opt capabilities.Option) layout.D
 	if isCopiesOption(opt.ID) {
 		return w.copiesOptionRow(gtx, opt)
 	}
+	if opt.Range != nil {
+		return w.numericOptionRow(gtx, opt)
+	}
 	// Render every value advertised by Fiery. The page-level material list and
 	// scrollbar handle long option groups, so manual selection is never limited
 	// to an arbitrary subset of the server's values.
@@ -779,10 +940,14 @@ func (w *Window) optionRow(gtx layout.Context, opt capabilities.Option) layout.D
 	ensureBools(w.selected, opt.ID, values)
 	defaultValue := fallback(opt.Value, "not reported")
 	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+		metadata := fmt.Sprintf("%s · %d value(s) · default: %s", opt.ID, len(values), defaultValue)
+		if len(opt.Constraints) > 0 {
+			metadata += fmt.Sprintf(" · constraints on %d value(s)", len(opt.Constraints))
+		}
 		items := []layout.FlexChild{
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionHeader(gtx, opt, values) }),
 			layout.Rigid(spacer(3)),
-			layout.Rigid(label(w.theme, fmt.Sprintf("%s · %d value(s) · default: %s", opt.ID, len(values), defaultValue), 12, palette.muted).Layout),
+			layout.Rigid(label(w.theme, metadata, 12, palette.muted).Layout),
 			layout.Rigid(spacer(8)),
 		}
 		for _, value := range values {
@@ -850,6 +1015,39 @@ func (w *Window) headerCheckbox(store map[string]*widget.Bool, key string) *widg
 		store[key] = new(widget.Bool)
 	}
 	return store[key]
+}
+
+func (w *Window) numericOptionRow(gtx layout.Context, opt capabilities.Option) layout.Dimensions {
+	input := w.numericInput(opt.ID)
+	rangeInfo := fmt.Sprintf("allowed: %s to %s · increment %s", formatNumber(opt.Range.Min, opt.Range.Precision), formatNumber(opt.Range.Max, opt.Range.Precision), formatNumber(opt.Range.Increment, opt.Range.Precision))
+	description := "Enter one value, comma-separated values, or an inclusive range such as 5-10 or 5 to 10. Leave blank to omit this setting."
+	if opt.Synthetic && (opt.ID == "Scaling" || opt.ID == "EFScale") {
+		description = "Optional scale percentage. This standard job-ticket field is sent only when populated; Fiery remains authoritative and validates support for the imported job."
+	}
+	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(label(w.theme, opt.Label, 15, palette.text).Layout),
+			layout.Rigid(spacer(3)),
+			layout.Rigid(label(w.theme, fmt.Sprintf("%s · %s · default: %s", opt.ID, rangeInfo, fallback(opt.Value, "not reported")), 12, palette.muted).Layout),
+			layout.Rigid(spacer(7)),
+			layout.Rigid(label(w.theme, description, 13, palette.muted).Layout),
+			layout.Rigid(spacer(7)),
+			layout.Rigid(fieldBox(w.theme, opt.Label, "Single value, list, or range", input, 620)),
+		)
+	})
+}
+
+func (w *Window) numericInput(optionID string) *widget.Editor {
+	if w.numericInputs[optionID] == nil {
+		editor := new(widget.Editor)
+		initEditor(editor, "")
+		w.numericInputs[optionID] = editor
+	}
+	return w.numericInputs[optionID]
+}
+
+func formatNumber(value float64, precision int) string {
+	return strconv.FormatFloat(value, 'f', precision, 64)
 }
 
 func (w *Window) copiesOptionRow(gtx layout.Context, opt capabilities.Option) layout.Dimensions {
@@ -937,7 +1135,7 @@ func (w *Window) resultsTable(gtx layout.Context) layout.Dimensions {
 	results := append([]resultRow(nil), w.results...)
 	resultCount := w.resultCount
 	w.mu.Unlock()
-	rows := []layout.FlexChild{layout.Rigid(label(w.theme, "Job ID                    Job name                              Result   Duration   Detail", 13, palette.muted).Layout)}
+	rows := []layout.FlexChild{layout.Rigid(label(w.theme, "Job ID              Job name                    Result  Status          State           Duration  Detail", 13, palette.muted).Layout)}
 	if len(results) == 0 {
 		rows = append(rows, layout.Rigid(label(w.theme, "No automation results yet.", 13, palette.text).Layout))
 	}
@@ -947,7 +1145,7 @@ func (w *Window) resultsTable(gtx layout.Context) layout.Dimensions {
 	}
 	for _, r := range results {
 		rr := r
-		rows = append(rows, layout.Rigid(label(w.theme, fmt.Sprintf("%-24s %-37s %-8s %-10s %s", short(rr.JobID, 22), short(rr.JobName, 35), rr.Result, rr.Duration, short(rr.Detail, 80)), 13, palette.text).Layout))
+		rows = append(rows, layout.Rigid(label(w.theme, fmt.Sprintf("%-19s %-27s %-7s %-15s %-15s %-9s %s", short(rr.JobID, 17), short(rr.JobName, 25), rr.Result, short(rr.Status, 13), short(rr.State, 13), rr.Duration, short(rr.Detail, 65)), 13, palette.text).Layout))
 	}
 	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
@@ -1284,7 +1482,7 @@ func (w *Window) startAPITrace() {
 	}
 	combos, _, err := w.selectedCombinations()
 	if err != nil {
-		w.setStatus("API trace copies input is invalid: " + err.Error())
+		w.setStatus("API trace feature input is invalid: " + err.Error())
 		return
 	}
 	if len(combos) == 0 || len(combos[0]) == 0 {
@@ -1360,6 +1558,23 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 		return report
 	}
 	capture("done spooling before update")
+	w.mu.Lock()
+	capabilityModel := w.capabilities
+	w.mu.Unlock()
+	if capabilities.NeedsConstraintCheck(capabilityModel, attrs) {
+		constraintCheck, constraintErr := client.CheckJobConstraints(ctx, session, imp.JobID, attrs)
+		if constraintErr != nil {
+			report.Error = "constraint validation: " + constraintErr.Error()
+			capture("constraint check failed")
+			return report
+		}
+		if constraintCheck.HasConflicts() {
+			report.Result = "FAIL"
+			report.Lifecycle = "Fiery constraint conflict: " + formatStringMap(constraintCheck.Conflicts)
+			capture("constraint conflict")
+			return report
+		}
+	}
 	if err := client.UpdateJobAttributes(ctx, session, imp.JobID, attrs); err != nil {
 		report.Error = err.Error()
 		capture("update failed")
@@ -1367,6 +1582,14 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 	}
 	capture("immediately after update")
 	if err := w.performModeLifecycle(ctx, client, session, imp.JobID, mode); err != nil {
+		var failed *lifecycleFailure
+		if errors.As(err, &failed) {
+			report.Final = failed.attrs
+			report.Lifecycle = failed.outcome.Summary()
+			report.Result = "FAIL"
+			capture("lifecycle failed")
+			return report
+		}
 		report.Error = err.Error()
 		capture("lifecycle failed")
 		return report
@@ -1384,7 +1607,9 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 		return report
 	}
 	capture("final verification")
-	if w.attributesMatch(final, attrs) {
+	outcome := joboutcome.Evaluate(final, lifecyclePolicy(mode))
+	report.Lifecycle = outcome.Summary()
+	if outcome.Pass && w.attributesMatch(final, attrs) {
 		report.Result = "PASS"
 	} else {
 		report.Result = "FAIL"
@@ -1424,7 +1649,7 @@ func (w *Window) startRun() {
 	workers := parseWorkerCount(w.workers.Text())
 	combos, axes, err := w.selectedCombinations()
 	if err != nil {
-		w.setStatus("Copies input is invalid: " + err.Error())
+		w.setStatus("Feature input is invalid: " + err.Error())
 		return
 	}
 	w.logSelectedCombinations(combos, axes)
@@ -1472,6 +1697,7 @@ func (w *Window) startRun() {
 		OptionsDiscovered: len(capabilityModel.Options),
 		TestFileCount:     len(selectedFiles),
 		CombinationCount:  len(combos),
+		ConstraintSkipped: w.constraintSkipped,
 		PlannedTests:      plannedTests,
 		Workers:           workers,
 		Strategy:          string(w.strategy),
@@ -1590,6 +1816,10 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		result.Detail = detail
 		result.JobName = jobNameFromAttributes(got, result.JobName)
 		result.GetValues = selectedReadbackValues(got, attrs)
+		result.JobStatus = got["status"]
+		result.JobState = got["state"]
+		result.JobError = firstNonEmpty(got["error"], got["pdl error"])
+		result.LastEvent = got["last joblog event"]
 		w.addResult(*result)
 	}
 
@@ -1604,14 +1834,43 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
 		return
 	}
+	// A visible job can still be spooling. Wait for the imported ticket to be
+	// stable before any update or lifecycle decision so Hold-only runs do not
+	// report a premature pass and ticket updates are not overwritten.
+	w.addLog("Waiting for job %s status=done spooling", imp.JobID)
+	spooled, err := w.waitJobCondition(ctx, client, session, imp.JobID, "done spooling after import", 4*time.Minute, time.Second, func(attributes map[string]string) bool {
+		return statusEquals("done spooling")(attributes) || !joboutcome.Evaluate(attributes, joboutcome.Policy{}).Pass
+	})
+	if err != nil {
+		finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), spooled)
+		return
+	}
+	if outcome := joboutcome.Evaluate(spooled, joboutcome.Policy{}); !outcome.Pass {
+		result.Lifecycle = outcome.Summary()
+		finish("FAIL", fmt.Sprintf("mode=%s: job failed while spooling: %s", mode.Label, outcome.Summary()), spooled)
+		return
+	}
 	if len(attrs) > 0 {
-		// Wait for the imported ticket to finish spooling before changing it.
-		// Command/rerip attributes can otherwise be accepted and subsequently
-		// overwritten when Fiery finishes constructing the job ticket.
-		w.addLog("Waiting for job %s status=done spooling before setting attributes", imp.JobID)
-		if _, err := w.waitJobCondition(ctx, client, session, imp.JobID, "done spooling before attribute update", 4*time.Minute, time.Second, statusEquals("done spooling")); err != nil {
-			finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
-			return
+		w.mu.Lock()
+		capabilityModel := w.capabilities
+		w.mu.Unlock()
+		if capabilities.NeedsConstraintCheck(capabilityModel, attrs) {
+			constraintCheck, constraintErr := client.CheckJobConstraints(ctx, session, imp.JobID, attrs)
+			if constraintErr != nil {
+				finish("ERROR", fmt.Sprintf("mode=%s: job constraint validation failed: %v", mode.Label, constraintErr), nil)
+				return
+			}
+			if constraintCheck.HasConflicts() {
+				got, _ := client.GetJobAttributes(ctx, session, imp.JobID)
+				result.Lifecycle = "Fiery constraint conflict: " + formatStringMap(constraintCheck.Conflicts)
+				finish("FAIL", fmt.Sprintf("mode=%s: Fiery rejected the selected settings as constrained: %s; solutions=%v", mode.Label, formatStringMap(constraintCheck.Conflicts), constraintCheck.Solutions), got)
+				return
+			}
+			if constraintCheck.Supported {
+				w.addLog("Fiery job constraint check passed for job %s", imp.JobID)
+			} else if constraintCheck.Warning != "" {
+				w.addLog("Fiery job constraint endpoint unavailable for job %s; update response remains authoritative: %s", imp.JobID, short(constraintCheck.Warning, 300))
+			}
 		}
 		w.addLog("Setting job %s attributes after done spooling: %s", imp.JobID, formatAttributes(attrs))
 		if err := client.UpdateJobAttributes(ctx, session, imp.JobID, attrs); err != nil {
@@ -1645,7 +1904,13 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		return
 	}
 	if err := w.performModeLifecycle(ctx, client, session, imp.JobID, mode); err != nil {
-		finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
+		var failed *lifecycleFailure
+		if errors.As(err, &failed) {
+			result.Lifecycle = failed.outcome.Summary()
+			finish("FAIL", fmt.Sprintf("mode=%s: lifecycle verification failed: %s", mode.Label, failed.outcome.Summary()), failed.attrs)
+		} else {
+			finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
+		}
 		return
 	}
 	got, err := w.readBackAttributes(ctx, client, session, imp.JobID, attrs)
@@ -1653,10 +1918,16 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), got)
 		return
 	}
+	outcome := joboutcome.Evaluate(got, lifecyclePolicy(mode))
+	result.Lifecycle = outcome.Summary()
+	if !outcome.Pass {
+		finish("FAIL", fmt.Sprintf("mode=%s: lifecycle verification failed: %s", mode.Label, outcome.Summary()), got)
+		return
+	}
 	status := "PASS"
-	detail := fmt.Sprintf("mode=%s: set values matched get values", mode.Label)
+	detail := fmt.Sprintf("mode=%s: lifecycle passed (%s); set values matched get values", mode.Label, outcome.Summary())
 	if len(attrs) == 0 {
-		detail = fmt.Sprintf("mode=%s: import/lifecycle completed; no job attributes were selected for set/get verification", mode.Label)
+		detail = fmt.Sprintf("mode=%s: lifecycle passed (%s); no job attributes were selected for set/get verification", mode.Label, outcome.Summary())
 	}
 	for k, v := range attrs {
 		if !w.attributeValueMatches(k, got[k], v) {
@@ -1799,23 +2070,29 @@ func (w *Window) performModeLifecycle(ctx context.Context, client *fiery.Client,
 	for _, action := range mode.Actions {
 		switch action {
 		case "rip":
-			w.addLog("Waiting for job %s status=done spooling before RIP", jobID)
-			if _, err := w.waitJobCondition(ctx, client, session, jobID, "done spooling before RIP", 4*time.Minute, 2*time.Second, statusEquals("done spooling")); err != nil {
-				return err
-			}
+			// executeJob and the API-trace workflow both stabilize the imported
+			// ticket at done spooling before entering lifecycle actions. Avoid a
+			// second six-endpoint readback here, especially at high concurrency.
 			w.addLog("Running RIP for job %s", jobID)
 			if err := client.JobAction(ctx, session, jobID, "rip"); err != nil {
 				return err
 			}
-			w.addLog("Waiting for job %s status=done ripping after RIP", jobID)
-			if _, err := w.waitJobCondition(ctx, client, session, jobID, "done ripping after RIP", 6*time.Minute, 2*time.Second, statusEquals("done ripping")); err != nil {
+			w.addLog("Waiting for job %s status=done ripping or a terminal Fiery failure after RIP", jobID)
+			observed, err := w.waitJobCondition(ctx, client, session, jobID, "RIP completion", 6*time.Minute, 2*time.Second, func(attributes map[string]string) bool {
+				if statusEquals("done ripping")(attributes) {
+					return true
+				}
+				return !joboutcome.Evaluate(attributes, joboutcome.Policy{}).Pass
+			})
+			if err != nil {
 				return err
+			}
+			if outcome := joboutcome.Evaluate(observed, joboutcome.Policy{}); !outcome.Pass {
+				return &lifecycleFailure{outcome: outcome, attrs: observed}
 			}
 		case "production":
-			w.addLog("Waiting for job %s status=done ripping before Ready to Print", jobID)
-			if _, err := w.waitJobCondition(ctx, client, session, jobID, "done ripping before production", 6*time.Minute, 2*time.Second, statusEquals("done ripping")); err != nil {
-				return err
-			}
+			// Production always follows a successful RIP in the declared modes.
+			// Reuse that lifecycle guarantee rather than polling done ripping twice.
 			w.addLog("Moving job %s to production release state", jobID)
 			if err := client.UpdateJobAttributes(ctx, session, jobID, map[string]string{"job release state": "production"}); err != nil {
 				return err
@@ -1843,11 +2120,7 @@ func (w *Window) performModeLifecycle(ctx context.Context, client *fiery.Client,
 				return err
 			}
 		case "cancel_ripping":
-			w.addLog("Waiting for dedicated cancel job %s status=done spooling before RIP", jobID)
-			if _, err := w.waitJobCondition(ctx, client, session, jobID, "done spooling before cancel-during-RIP", 4*time.Minute, time.Second, statusEquals("done spooling")); err != nil {
-				return err
-			}
-			w.addLog("Starting RIP for dedicated cancel test job %s", jobID)
+			w.addLog("Starting RIP for dedicated cancel test job %s after stable spooling", jobID)
 			if err := client.JobAction(ctx, session, jobID, "rip"); err != nil {
 				return err
 			}
@@ -1980,6 +2253,19 @@ func cancelObserved(attrs map[string]string) bool {
 	}
 	state = strings.ToLower(state)
 	return !strings.Contains(state, "done print") && !strings.Contains(state, "complete") && !strings.Contains(state, "printed")
+}
+
+func lifecyclePolicy(mode runMode) joboutcome.Policy {
+	policy := joboutcome.Policy{}
+	switch mode.Label {
+	case "Process and Hold", "RIP":
+		policy.RequireProcessedRaster = true
+	case "Print":
+		policy.RequirePrinted = true
+	case "Cancel while Processing/Ripping", "Cancel while Waiting to Print", "Cancel while Printing":
+		policy.ExpectCanceled = true
+	}
+	return policy
 }
 
 func modeIncludesAction(mode runMode, want string) bool {
@@ -2115,6 +2401,9 @@ func (w *Window) selectedCombinations() ([]combinations.Combination, []combinati
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
+		if _, exists := model.OptionByID(id); !exists {
+			continue
+		}
 		vals := selectedValues(w.selected[id])
 		if len(vals) == 0 {
 			continue
@@ -2133,33 +2422,80 @@ func (w *Window) selectedCombinations() ([]combinations.Combination, []combinati
 	if len(axes) == 0 && w.strategy != combinations.StrategySelected {
 		axes = defaultPermutationAxes(model)
 	}
-	copySelection := copyvalues.Selection{}
+	hasRange := false
 	if copyOption, ok := copiesOption(model); ok {
-		var err error
-		copySelection, err = copyvalues.Parse(w.copiesInput.Text())
+		copySelection, err := copyvalues.Parse(w.copiesInput.Text())
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("copies: %w", err)
 		}
+		hasRange = copySelection.HasRange
 		axes = append(axes, combinations.Axis{Name: copyOption.ID, Values: copySelection.Values})
+	}
+	for _, option := range model.Options {
+		if option.Range == nil || isCopiesOption(option.ID) {
+			continue
+		}
+		input := w.numericInputs[option.ID]
+		if input == nil || strings.TrimSpace(input.Text()) == "" {
+			continue
+		}
+		bounds := rangevalues.Bounds{Min: option.Range.Min, Max: option.Range.Max, Increment: option.Range.Increment, Precision: option.Range.Precision}
+		selection, err := rangevalues.Parse(input.Text(), bounds, rangevalues.DefaultExpansionLimit)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s (%s): %w", option.Label, option.ID, err)
+		}
+		hasRange = hasRange || selection.HasRange
+		axes = append(axes, combinations.Axis{Name: option.ID, Values: selection.Values})
 	}
 	if len(axes) == 0 {
 		return []combinations.Combination{{}}, nil, nil
 	}
 	generationStrategy := w.strategy
-	if copySelection.HasRange && generationStrategy != combinations.StrategyPairwise {
-		// A range requests random distribution. When the complete product fits
-		// under the case limit the random generator still returns every case;
-		// otherwise it samples across the full range instead of taking only the
-		// lowest copy counts.
+	if hasRange && generationStrategy != combinations.StrategyPairwise {
+		// Numeric ranges request distribution across the full range. When the
+		// product exceeds Max cases, direct mixed-radix sampling avoids both a
+		// low-value bias and materializing the full Cartesian product.
 		generationStrategy = combinations.StrategyRandom
 	}
-	generated := combinations.GenerateWithStrategy(axes, generationStrategy, parseCaseLimit(w.maxCases.Text()))
-	if copySelection.HasRange && len(generated) > 1 {
+	requestedLimit := parseCaseLimit(w.maxCases.Text())
+	candidateLimit := requestedLimit
+	axisIDs := make(map[string]struct{}, len(axes))
+	for _, axis := range axes {
+		axisIDs[axis.Name] = struct{}{}
+	}
+	if capabilities.HasExplicitConstraintDependencies(model, axisIDs) {
+		// Generate a bounded reserve so an invalid early Cartesian/pairwise row
+		// does not consume the user's entire Max cases allowance when compatible
+		// rows exist later. The global 10,000 safety ceiling still applies.
+		candidateLimit = maxCaseLimit
+	}
+	generated := combinations.GenerateWithStrategy(axes, generationStrategy, candidateLimit)
+	if hasRange && len(generated) > 1 {
 		mathrand.Shuffle(len(generated), func(left, right int) {
 			generated[left], generated[right] = generated[right], generated[left]
 		})
 	}
-	return generated, axes, nil
+	valid := generated[:0]
+	w.constraintSkipped = 0
+	w.constraintWarning = ""
+	for _, combination := range generated {
+		conflicts := capabilities.ValidateCombination(model, combination)
+		if len(conflicts) > 0 {
+			w.constraintSkipped++
+			if w.constraintWarning == "" {
+				w.constraintWarning = conflicts[0].Error()
+			}
+			continue
+		}
+		valid = append(valid, combination)
+	}
+	if len(valid) == 0 && len(generated) > 0 {
+		return nil, axes, fmt.Errorf("all generated combinations conflict with published Fiery constraints; first conflict: %s", w.constraintWarning)
+	}
+	if len(valid) > requestedLimit {
+		valid = valid[:requestedLimit]
+	}
+	return valid, axes, nil
 }
 
 func copiesOption(model capabilities.Model) (capabilities.Option, bool) {
@@ -2174,6 +2510,9 @@ func copiesOption(model capabilities.Model) (capabilities.Option, bool) {
 func (w *Window) logSelectedCombinations(combos []combinations.Combination, axes []combinations.Axis) {
 	if copySelection, err := copyvalues.Parse(w.copiesInput.Text()); err == nil && copySelection.HasRange {
 		w.addLog("Copies range expanded to %d value(s) and randomized within Max cases=%s", len(copySelection.Values), w.maxCases.Text())
+	}
+	if w.constraintSkipped > 0 {
+		w.addLog("Skipped %d locally conflicting combination(s) using published Fiery constraints; first conflict: %s", w.constraintSkipped, w.constraintWarning)
 	}
 	selected := make([]string, 0, len(axes))
 	for _, axis := range axes {
@@ -2228,6 +2567,17 @@ func isLikelyJobAttribute(opt capabilities.Option) bool {
 	}
 	return false
 }
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func formatStringMap(values map[string]string) string { return formatAttributes(values) }
 
 func formatAttributes(attrs map[string]string) string {
 	keys := make([]string, 0, len(attrs))
@@ -2470,7 +2820,7 @@ func (w *Window) addResult(result reportxlsx.Result) {
 	duration := time.Duration(result.DurationMS) * time.Millisecond
 	w.mu.Lock()
 	w.resultCount++
-	w.results = append(w.results, resultRow{JobID: result.JobID, JobName: result.JobName, Result: result.Result, Duration: duration.Round(time.Millisecond).String(), Detail: result.Detail})
+	w.results = append(w.results, resultRow{JobID: result.JobID, JobName: result.JobName, Result: result.Result, Status: result.JobStatus, State: result.JobState, Duration: duration.Round(time.Millisecond).String(), Detail: result.Detail})
 	if len(w.results) > maxRetainedResults+retainedEntryTrimBatch {
 		w.results = append([]resultRow(nil), w.results[len(w.results)-maxRetainedResults:]...)
 	}

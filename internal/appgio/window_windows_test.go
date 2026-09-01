@@ -11,6 +11,7 @@ import (
 
 	"api-automation/internal/capabilities"
 	"api-automation/internal/combinations"
+	"api-automation/internal/presets"
 
 	"gioui.org/widget"
 )
@@ -166,6 +167,103 @@ func TestOptionValuesReturnsEveryServerAdvertisedValue(t *testing.T) {
 		if got[index] != values[index] {
 			t.Fatalf("value %d = %q, want %q", index, got[index], values[index])
 		}
+	}
+}
+
+func TestLoadPresetRestoresSafeSettingsAndPreservesCredentials(t *testing.T) {
+	window := &Window{
+		selected: map[string]map[string]*widget.Bool{}, numericInputs: map[string]*widget.Editor{},
+		groupChecks: map[string]*widget.Bool{}, optionChecks: map[string]*widget.Bool{},
+		capabilities: capabilities.Model{SerialNumber: "SERVER-1", Options: []capabilities.Option{
+			{ID: "EFColorMode", Values: []string{"CMYK", "Grayscale"}},
+			{ID: "num copies", Range: &capabilities.NumericRange{Min: 1, Max: 9999, Increment: 1}},
+			{ID: "Scaling", Range: &capabilities.NumericRange{Min: 25, Max: 400, Increment: 1}},
+		}},
+		presetList: []presets.Preset{{
+			Name: "Production", ServerSerial: "SERVER-1",
+			SelectedValues: map[string][]string{"EFColorMode": {"CMYK"}},
+			NumericInputs:  map[string]string{"num copies": "5-7", "Scaling": "100"},
+			Strategy:       "pairwise", MaxCases: "250", ParallelJobs: "8", RunModes: []string{"Process and Hold"}, FileMode: "random",
+		}},
+		modeChecks: make([]widget.Bool, len(runModes)),
+	}
+	window.serverIP.SetText("server.example")
+	window.secretKey.SetText("secret-not-saved-in-preset")
+	window.password.SetText("password-not-saved-in-preset")
+	window.presetName.SetText("Production")
+	window.loadNamedPreset()
+	if !window.selected["EFColorMode"]["CMYK"].Value || window.copiesInput.Text() != "5-7" || window.numericInputs["Scaling"].Text() != "100" {
+		t.Fatalf("preset values were not restored: selected=%#v copies=%q scale=%q", window.selected, window.copiesInput.Text(), window.numericInputs["Scaling"].Text())
+	}
+	if window.strategy != combinations.StrategyPairwise || window.maxCases.Text() != "250" || window.workers.Text() != "8" || window.fileModeGroup.Value != "random" || !window.modeChecks[1].Value {
+		t.Fatal("preset execution controls were not restored")
+	}
+	if window.serverIP.Text() != "server.example" || window.secretKey.Text() != "secret-not-saved-in-preset" || window.password.Text() != "password-not-saved-in-preset" {
+		t.Fatal("loading a preset changed connection credentials")
+	}
+}
+
+func TestNumericRangeInputFeedsCombinationGeneration(t *testing.T) {
+	window := &Window{
+		strategy:      combinations.StrategySelected,
+		selected:      map[string]map[string]*widget.Bool{},
+		numericInputs: map[string]*widget.Editor{},
+		capabilities: capabilities.Model{Options: []capabilities.Option{{
+			ID: "EFMediaThickness", Label: "Media thickness", Group: "fppapersource", Value: "1",
+			Range: &capabilities.NumericRange{Min: 1, Max: 10, Increment: 1, Precision: 0},
+		}}},
+	}
+	window.maxCases.SetText("100")
+	window.numericInput("EFMediaThickness").SetText("2-4")
+	got, axes, err := window.selectedCombinations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || len(axes) != 1 {
+		t.Fatalf("combinations=%#v axes=%#v", got, axes)
+	}
+	seen := map[string]bool{}
+	for _, combination := range got {
+		seen[combination["EFMediaThickness"]] = true
+	}
+	for _, value := range []string{"2", "3", "4"} {
+		if !seen[value] {
+			t.Fatalf("missing numeric range value %s in %#v", value, got)
+		}
+	}
+}
+
+func TestSelectedCombinationsSkipsPublishedConstraintConflicts(t *testing.T) {
+	window := &Window{
+		strategy: combinations.StrategySelected,
+		selected: map[string]map[string]*widget.Bool{
+			"EFResolution":   {"360x720dpi": &widget.Bool{Value: true}},
+			"EFEdgeDropSize": {"None": &widget.Bool{Value: true}, "0_1_2_2_2": &widget.Bool{Value: true}},
+		},
+		capabilities: capabilities.Model{Options: []capabilities.Option{
+			{ID: "EFResolution", Values: []string{"360x720dpi"}, Constraints: capabilities.Constraints{"360x720dpi": {"EFEdgeDropSize": {"0_1_2_2_2"}}}},
+			{ID: "EFEdgeDropSize", Values: []string{"None", "0_1_2_2_2"}},
+		}},
+	}
+	window.maxCases.SetText("100")
+	got, _, err := window.selectedCombinations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0]["EFEdgeDropSize"] != "0_1_2_2_2" || window.constraintSkipped != 1 {
+		t.Fatalf("combinations=%#v skipped=%d warning=%q", got, window.constraintSkipped, window.constraintWarning)
+	}
+}
+
+func TestLifecyclePolicyRequiresProcessedRasterOnlyForProcessingModes(t *testing.T) {
+	if !lifecyclePolicy(runModes[1]).RequireProcessedRaster || !lifecyclePolicy(runModes[2]).RequireProcessedRaster {
+		t.Fatal("Process and Hold and RIP must require processed raster evidence")
+	}
+	if lifecyclePolicy(runModes[0]).RequireProcessedRaster {
+		t.Fatal("Hold must not require processed raster evidence")
+	}
+	if !lifecyclePolicy(runModes[5]).RequirePrinted || !lifecyclePolicy(runModes[6]).ExpectCanceled {
+		t.Fatal("print/cancel lifecycle policies are incorrect")
 	}
 }
 

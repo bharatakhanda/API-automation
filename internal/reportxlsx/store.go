@@ -21,6 +21,11 @@ type Result struct {
 	Result     string            `json:"result"`
 	Mode       string            `json:"mode,omitempty"`
 	DurationMS int64             `json:"durationMs"`
+	JobStatus  string            `json:"jobStatus,omitempty"`
+	JobState   string            `json:"jobState,omitempty"`
+	JobError   string            `json:"jobError,omitempty"`
+	LastEvent  string            `json:"lastEvent,omitempty"`
+	Lifecycle  string            `json:"lifecycle,omitempty"`
 	Detail     string            `json:"detail,omitempty"`
 	SetValues  map[string]string `json:"setValues,omitempty"`
 	GetValues  map[string]string `json:"getValues,omitempty"`
@@ -40,6 +45,7 @@ type Summary struct {
 	OptionsDiscovered int
 	TestFileCount     int
 	CombinationCount  int
+	ConstraintSkipped int
 	PlannedTests      int64
 	Workers           int
 	Strategy          string
