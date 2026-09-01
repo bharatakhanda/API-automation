@@ -53,6 +53,61 @@ func TestPairwiseHonorsLimit(t *testing.T) {
 	}
 }
 
+func TestPairwiseDoesNotMaterializeHugeCartesianProduct(t *testing.T) {
+	axes := make([]Axis, 12)
+	for axisIndex := range axes {
+		axes[axisIndex].Name = string(rune('A' + axisIndex))
+		for value := 0; value < 12; value++ {
+			axes[axisIndex].Values = append(axes[axisIndex].Values, string(rune('a'+value)))
+		}
+	}
+	got := GenerateWithStrategy(axes, StrategyPairwise, 100)
+	if len(got) != 100 {
+		t.Fatalf("len = %d, want bounded result of 100", len(got))
+	}
+	for _, combo := range got {
+		if len(combo) != len(axes) {
+			t.Fatalf("incomplete combination: %#v", combo)
+		}
+	}
+}
+
+func TestRandomStrategySamplesHugeProductWithoutDuplicates(t *testing.T) {
+	axes := make([]Axis, 20)
+	for axisIndex := range axes {
+		axes[axisIndex] = Axis{Name: string(rune('A' + axisIndex)), Values: []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"}}
+	}
+	got := GenerateWithStrategy(axes, StrategyRandom, 100)
+	if len(got) != 100 {
+		t.Fatalf("len = %d, want 100", len(got))
+	}
+	seen := map[string]struct{}{}
+	for _, combo := range got {
+		key := ""
+		for _, axis := range axes {
+			key += combo[axis.Name]
+		}
+		if _, duplicate := seen[key]; duplicate {
+			t.Fatalf("duplicate random combination %q", key)
+		}
+		seen[key] = struct{}{}
+	}
+}
+
+func allPairs(axes []Axis) map[string]struct{} {
+	pairs := map[string]struct{}{}
+	for i := 0; i < len(axes); i++ {
+		for j := i + 1; j < len(axes); j++ {
+			for _, left := range axes[i].Values {
+				for _, right := range axes[j].Values {
+					pairs[pairKey(axes[i].Name, left, axes[j].Name, right)] = struct{}{}
+				}
+			}
+		}
+	}
+	return pairs
+}
+
 func assertPairwiseCoverage(t *testing.T, axes []Axis, got []Combination) {
 	t.Helper()
 	covered := map[string]struct{}{}

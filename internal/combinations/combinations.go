@@ -31,7 +31,7 @@ func GenerateWithStrategy(axes []Axis, strategy Strategy, limit int) []Combinati
 	case StrategyPairwise:
 		return pairwise(axes, limit)
 	case StrategyRandom:
-		return randomSample(cartesian(axes, -1), limit)
+		return randomCombinations(axes, limit)
 	default:
 		return cartesian(axes, limit)
 	}
@@ -49,11 +49,7 @@ func cartesian(axes []Axis, limit int) []Combination {
 			return
 		}
 		if idx == len(filtered) {
-			combo := make(Combination, len(current))
-			for k, v := range current {
-				combo[k] = v
-			}
-			out = append(out, combo)
+			out = append(out, cloneCombination(current))
 			return
 		}
 		axis := filtered[idx]
@@ -67,8 +63,9 @@ func cartesian(axes []Axis, limit int) []Combination {
 	return out
 }
 
-// pairwise creates a deterministic greedy pairwise sample. It covers every
-// value pair across every two axes when the supplied limit is large enough.
+// pairwise uses incremental horizontal and vertical growth. Unlike an
+// exhaustive candidate-based implementation, its memory use is proportional
+// to the number of value pairs rather than the full Cartesian product.
 func pairwise(axes []Axis, limit int) []Combination {
 	axes = normalizeAxes(axes)
 	if len(axes) == 0 || limit == 0 {
@@ -77,66 +74,92 @@ func pairwise(axes []Axis, limit int) []Combination {
 	if len(axes) == 1 {
 		return cartesian(axes, limit)
 	}
-	uncovered := allPairs(axes)
-	if len(uncovered) == 0 {
-		return nil
-	}
 
-	candidates := cartesian(axes, -1)
-	out := make([]Combination, 0)
-	used := map[int]struct{}{}
-	for len(uncovered) > 0 && (limit < 0 || len(out) < limit) {
-		bestIdx := -1
-		bestCovered := 0
-		var bestPairs []string
-		for idx, candidate := range candidates {
-			if _, ok := used[idx]; ok {
-				continue
+	rows := cartesian(axes[:2], limit)
+	for next := 2; next < len(axes); next++ {
+		uncovered := pairsWithAxis(axes, next)
+
+		// Horizontal growth assigns the value that covers the most new pairs to
+		// every existing row.
+		for _, row := range rows {
+			bestValue := axes[next].Values[0]
+			bestScore := -1
+			for _, candidate := range axes[next].Values {
+				score := 0
+				for previous := 0; previous < next; previous++ {
+					if _, ok := uncovered[pairKey(axes[previous].Name, row[axes[previous].Name], axes[next].Name, candidate)]; ok {
+						score++
+					}
+				}
+				if score > bestScore {
+					bestValue, bestScore = candidate, score
+				}
 			}
-			pairs := coveredPairs(candidate, axes, uncovered)
-			if len(pairs) > bestCovered {
-				bestIdx = idx
-				bestCovered = len(pairs)
-				bestPairs = pairs
+			row[axes[next].Name] = bestValue
+			removeCoveredPairs(uncovered, row, axes, next)
+		}
+
+		// Vertical growth adds rows only for pairs that horizontal growth could
+		// not cover. Every added row is complete and can cover several pairs.
+		for len(uncovered) > 0 && (limit < 0 || len(rows) < limit) {
+			previous, previousValue, nextValue, ok := firstUncoveredPair(uncovered, axes, next)
+			if !ok {
+				break
 			}
-		}
-		if bestIdx < 0 || bestCovered == 0 {
-			break
-		}
-		used[bestIdx] = struct{}{}
-		out = append(out, cloneCombination(candidates[bestIdx]))
-		for _, pair := range bestPairs {
-			delete(uncovered, pair)
+			row := make(Combination, next+1)
+			row[axes[next].Name] = nextValue
+			for axisIndex := 0; axisIndex < next; axisIndex++ {
+				value := axes[axisIndex].Values[0]
+				if axisIndex == previous {
+					value = previousValue
+				} else {
+					for _, candidate := range axes[axisIndex].Values {
+						key := pairKey(axes[axisIndex].Name, candidate, axes[next].Name, nextValue)
+						if _, found := uncovered[key]; found {
+							value = candidate
+							break
+						}
+					}
+				}
+				row[axes[axisIndex].Name] = value
+			}
+			removeCoveredPairs(uncovered, row, axes, next)
+			rows = append(rows, row)
 		}
 	}
-	return out
+	return rows
 }
 
-func allPairs(axes []Axis) map[string]struct{} {
-	pairs := map[string]struct{}{}
-	for i := 0; i < len(axes); i++ {
-		for j := i + 1; j < len(axes); j++ {
-			for _, left := range axes[i].Values {
-				for _, right := range axes[j].Values {
-					pairs[pairKey(axes[i].Name, left, axes[j].Name, right)] = struct{}{}
+func pairsWithAxis(axes []Axis, next int) map[string]struct{} {
+	pairs := make(map[string]struct{})
+	for previous := 0; previous < next; previous++ {
+		for _, previousValue := range axes[previous].Values {
+			for _, nextValue := range axes[next].Values {
+				pairs[pairKey(axes[previous].Name, previousValue, axes[next].Name, nextValue)] = struct{}{}
+			}
+		}
+	}
+	return pairs
+}
+
+func removeCoveredPairs(uncovered map[string]struct{}, row Combination, axes []Axis, next int) {
+	for previous := 0; previous < next; previous++ {
+		delete(uncovered, pairKey(axes[previous].Name, row[axes[previous].Name], axes[next].Name, row[axes[next].Name]))
+	}
+}
+
+func firstUncoveredPair(uncovered map[string]struct{}, axes []Axis, next int) (int, string, string, bool) {
+	for _, nextValue := range axes[next].Values {
+		for previous := 0; previous < next; previous++ {
+			for _, previousValue := range axes[previous].Values {
+				key := pairKey(axes[previous].Name, previousValue, axes[next].Name, nextValue)
+				if _, ok := uncovered[key]; ok {
+					return previous, previousValue, nextValue, true
 				}
 			}
 		}
 	}
-	return pairs
-}
-
-func coveredPairs(combo Combination, axes []Axis, uncovered map[string]struct{}) []string {
-	pairs := make([]string, 0)
-	for i := 0; i < len(axes); i++ {
-		for j := i + 1; j < len(axes); j++ {
-			key := pairKey(axes[i].Name, combo[axes[i].Name], axes[j].Name, combo[axes[j].Name])
-			if _, ok := uncovered[key]; ok {
-				pairs = append(pairs, key)
-			}
-		}
-	}
-	return pairs
+	return 0, "", "", false
 }
 
 func pairKey(leftName, leftValue, rightName, rightValue string) string {
@@ -151,23 +174,47 @@ func cloneCombination(in Combination) Combination {
 	return out
 }
 
-func randomSample(all []Combination, limit int) []Combination {
-	if limit <= 0 || limit >= len(all) {
-		return all
+// randomCombinations samples mixed-radix Cartesian indexes directly. It never
+// materializes the complete product just to return a small random subset.
+func randomCombinations(axes []Axis, limit int) []Combination {
+	axes = normalizeAxes(axes)
+	if len(axes) == 0 || limit == 0 {
+		return nil
 	}
+	if limit < 0 {
+		return cartesian(axes, limit)
+	}
+
+	total := big.NewInt(1)
+	for _, axis := range axes {
+		total.Mul(total, big.NewInt(int64(len(axis.Values))))
+	}
+	if total.Cmp(big.NewInt(int64(limit))) <= 0 {
+		return cartesian(axes, limit)
+	}
+
 	out := make([]Combination, 0, limit)
-	used := map[int]struct{}{}
+	used := make(map[string]struct{}, limit)
 	for len(out) < limit {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(all))))
+		index, err := rand.Int(rand.Reader, total)
 		if err != nil {
-			return all[:limit]
+			return cartesian(axes, limit)
 		}
-		idx := int(n.Int64())
-		if _, ok := used[idx]; ok {
+		key := index.String()
+		if _, exists := used[key]; exists {
 			continue
 		}
-		used[idx] = struct{}{}
-		out = append(out, all[idx])
+		used[key] = struct{}{}
+
+		remaining := new(big.Int).Set(index)
+		combo := make(Combination, len(axes))
+		for axisIndex := len(axes) - 1; axisIndex >= 0; axisIndex-- {
+			base := big.NewInt(int64(len(axes[axisIndex].Values)))
+			remainder := new(big.Int)
+			remaining.QuoRem(remaining, base, remainder)
+			combo[axes[axisIndex].Name] = axes[axisIndex].Values[remainder.Int64()]
+		}
+		out = append(out, combo)
 	}
 	return out
 }
