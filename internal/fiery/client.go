@@ -49,7 +49,8 @@ type Client struct {
 
 // Session contains the authenticated cookie required by Fiery API endpoints.
 type Session struct {
-	Cookie string
+	Cookie    string
+	LoginPath string
 }
 
 // ImportResult captures the server-side job created from a test file.
@@ -64,10 +65,14 @@ type ImportResult struct {
 // JobRawResponse captures the exact response from a single Fiery job GET so it
 // can be compared directly with the same request in tools such as Postman.
 type JobRawResponse struct {
-	Method     string
-	Endpoint   string
-	StatusCode int
-	Body       string
+	Variant         string            `json:"Variant,omitempty"`
+	Method          string            `json:"Method"`
+	Endpoint        string            `json:"Endpoint"`
+	RequestHeaders  map[string]string `json:"RequestHeaders,omitempty"`
+	ResponseProto   string            `json:"ResponseProto,omitempty"`
+	ResponseHeaders map[string]string `json:"ResponseHeaders,omitempty"`
+	StatusCode      int               `json:"StatusCode"`
+	Body            string            `json:"Body"`
 }
 
 func New(cfg Config) (*Client, error) {
@@ -87,27 +92,46 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	baseURL := cfg.ServerIP
-	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+	if !strings.Contains(baseURL, "://") {
 		baseURL = "https://" + baseURL
 	}
 	parsed, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse server URL: %w", err)
 	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("server URL scheme must be http or https, got %q", parsed.Scheme)
+	}
 	if parsed.Host == "" {
 		return nil, errors.New("server URL must include a host or IP address")
 	}
+	if parsed.User != nil {
+		return nil, errors.New("server URL must not include user information")
+	}
+	if parsed.Path != "" && parsed.Path != "/" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, errors.New("server URL must contain only a scheme and host")
+	}
+	parsed.Path, parsed.RawPath, parsed.RawQuery, parsed.Fragment = "", "", "", ""
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConns = 100
 	transport.MaxIdleConnsPerHost = 25
 	transport.IdleConnTimeout = 90 * time.Second
+	// Match Postman's generated cURL for job readback: do not add Go's automatic
+	// Accept-Encoding header.
+	transport.DisableCompression = true
+	// Postman/CWS use HTTP/1.1 for these Fiery calls. Keep Go from upgrading to
+	// HTTP/2 so readback behavior matches the reference clients as closely as
+	// possible.
+	transport.ForceAttemptHTTP2 = false
+	transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
 	if cfg.InsecureTLS {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // Fiery installations often use self-signed certificates.
 	}
 
 	return &Client{
-		baseURL: strings.TrimRight(parsed.String(), "/"),
+		baseURL: parsed.String(),
 		cfg:     cfg,
 		http:    &http.Client{Transport: transport, Timeout: 60 * time.Second},
 	}, nil
@@ -126,12 +150,7 @@ func (c *Client) Login(ctx context.Context) (Session, error) {
 }
 
 func (c *Client) login(ctx context.Context, apiPath string) (Session, error) {
-	payload := map[string]string{
-		"username":     c.cfg.Username,
-		"password":     c.cfg.Password,
-		"accessrights": c.cfg.SecretKey,
-	}
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(c.loginPayload(apiPath))
 	if err != nil {
 		return Session{}, err
 	}
@@ -148,7 +167,10 @@ func (c *Client) login(ctx context.Context, apiPath string) (Session, error) {
 		return Session{}, fmt.Errorf("login request: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if readErr != nil {
+		return Session{}, fmt.Errorf("read login response: %w", readErr)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return Session{}, fmt.Errorf("login failed with HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
@@ -161,24 +183,24 @@ func (c *Client) login(ctx context.Context, apiPath string) (Session, error) {
 	for _, cookie := range cookies {
 		cookiePairs = append(cookiePairs, cookie.Name+"="+cookie.Value)
 	}
-	return Session{Cookie: strings.Join(cookiePairs, "; ")}, nil
+	return Session{Cookie: strings.Join(cookiePairs, "; "), LoginPath: apiPath}, nil
 }
 
-func (c *Client) KeepAlive(ctx context.Context, session Session) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+apiV5+"/info", nil)
-	if err != nil {
-		return err
+func (c *Client) loginPayload(apiPath string) map[string]string {
+	payload := map[string]string{
+		"username": c.cfg.Username,
+		"password": c.cfg.Password,
 	}
-	req.Header.Set("Cookie", session.Cookie)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("keep-alive request: %w", err)
+	// Fiery v5 authenticates API clients with `apikey`. Sending the legacy
+	// `accessrights` field can still return HTTP 200 and a session cookie, but that
+	// session is restricted to the compact job response. The v4 fallback retains
+	// the legacy field expected by older servers.
+	if apiPath == apiV5 {
+		payload["apikey"] = c.cfg.SecretKey
+	} else {
+		payload["accessrights"] = c.cfg.SecretKey
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("keep-alive failed with HTTP %d", resp.StatusCode)
-	}
-	return nil
+	return payload
 }
 
 func (c *Client) ImportJob(ctx context.Context, session Session, filePath string) (ImportResult, error) {
@@ -205,33 +227,23 @@ func (c *Client) importJobToQueue(ctx context.Context, session Session, filePath
 	}
 	defer file.Close()
 
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
-	if err != nil {
-		return ImportResult{FilePath: filePath, Duration: time.Since(started)}, err
-	}
-	if _, err := io.Copy(part, file); err != nil {
-		return ImportResult{FilePath: filePath, Duration: time.Since(started)}, err
-	}
 	queue = strings.TrimSpace(queue)
 	if queue == "" {
 		queue = "hold"
 	}
-	if err := writer.WriteField("queue", queue); err != nil {
-		return ImportResult{FilePath: filePath, Duration: time.Since(started)}, err
-	}
-	if err := writer.Close(); err != nil {
+	body, contentLength, contentType, err := newMultipartJobBody(file, filePath, queue)
+	if err != nil {
 		return ImportResult{FilePath: filePath, Duration: time.Since(started)}, err
 	}
 
 	endpoint := c.baseURL + apiPath + "/jobs"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
 		return ImportResult{FilePath: filePath, Duration: time.Since(started)}, err
 	}
+	req.ContentLength = contentLength
 	req.Header.Set("Cookie", session.Cookie)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.http.Do(req)
@@ -239,13 +251,51 @@ func (c *Client) importJobToQueue(ctx context.Context, session Session, filePath
 		return ImportResult{FilePath: filePath, Duration: time.Since(started)}, fmt.Errorf("import job request %s queue=%q file=%q: %w", apiPath, queue, filepath.Base(filePath), err)
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 8192))
 	result := ImportResult{FilePath: filePath, StatusCode: resp.StatusCode, Duration: time.Since(started), RawBody: string(respBody), JobID: extractJobID(respBody)}
+	if readErr != nil {
+		return result, fmt.Errorf("read import response from %s: %w", apiPath, readErr)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return result, fmt.Errorf("import failed at %s with HTTP %d queue=%q file=%q: %s", apiPath+"/jobs", resp.StatusCode, queue, filepath.Base(filePath), strings.TrimSpace(result.RawBody))
 	}
+	if result.JobID == "" {
+		return result, fmt.Errorf("import at %s succeeded with HTTP %d but returned no job ID", apiPath+"/jobs", resp.StatusCode)
+	}
 	return result, nil
 }
+
+// newMultipartJobBody creates a streaming multipart body with an exact content
+// length. Only the small multipart headers are buffered; the job file itself is
+// read directly from disk by the HTTP transport.
+func newMultipartJobBody(file *os.File, filePath, queue string) (io.Reader, int64, string, error) {
+	info, err := file.Stat()
+	if err != nil {
+		return nil, 0, "", err
+	}
+
+	var prefix, suffix bytes.Buffer
+	destination := &switchWriter{dst: &prefix}
+	writer := multipart.NewWriter(destination)
+	if _, err := writer.CreateFormFile("file", filepath.Base(filePath)); err != nil {
+		return nil, 0, "", err
+	}
+	destination.dst = &suffix
+	if err := writer.WriteField("queue", queue); err != nil {
+		return nil, 0, "", err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, 0, "", err
+	}
+
+	contentLength := int64(prefix.Len()) + info.Size() + int64(suffix.Len())
+	body := io.MultiReader(bytes.NewReader(prefix.Bytes()), file, bytes.NewReader(suffix.Bytes()))
+	return body, contentLength, writer.FormDataContentType(), nil
+}
+
+type switchWriter struct{ dst io.Writer }
+
+func (w *switchWriter) Write(p []byte) (int, error) { return w.dst.Write(p) }
 
 func (c *Client) GetJobAttributes(ctx context.Context, session Session, jobID string) (map[string]string, error) {
 	jobID = strings.TrimSpace(jobID)
@@ -281,35 +331,117 @@ func (c *Client) GetRawJobResponses(ctx context.Context, session Session, jobID 
 	if jobID == "" {
 		return []JobRawResponse{{Method: http.MethodGet, Endpoint: "", StatusCode: 0, Body: "job ID is required"}}
 	}
-	responses := make([]JobRawResponse, 0, 2)
+	responses := make([]JobRawResponse, 0, 6)
 	for _, apiPath := range []string{apiV5, apiV4} {
 		endpoint := c.baseURL + apiPath + "/jobs/" + url.PathEscape(jobID)
-		result := JobRawResponse{Method: http.MethodGet, Endpoint: endpoint}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-		if err != nil {
-			result.Body = err.Error()
+		for _, variant := range jobGetVariants(session) {
+			result := JobRawResponse{Variant: variant.Name, Method: http.MethodGet, Endpoint: endpoint, RequestHeaders: variant.Snapshot}
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+			if err != nil {
+				result.Body = err.Error()
+				responses = append(responses, result)
+				continue
+			}
+			variant.Apply(req)
+			resp, err := c.http.Do(req)
+			if err != nil {
+				result.Body = err.Error()
+				responses = append(responses, result)
+				continue
+			}
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+			_ = resp.Body.Close()
+			result.ResponseProto = resp.Proto
+			result.ResponseHeaders = headerSnapshot(resp.Header)
+			result.StatusCode = resp.StatusCode
+			if readErr != nil {
+				result.Body = readErr.Error()
+			} else {
+				result.Body = string(body)
+			}
 			responses = append(responses, result)
-			continue
 		}
-		req.Header.Set("Cookie", session.Cookie)
-		req.Header.Set("Accept", "application/json")
-		resp, err := c.http.Do(req)
-		if err != nil {
-			result.Body = err.Error()
-			responses = append(responses, result)
-			continue
-		}
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
-		_ = resp.Body.Close()
-		result.StatusCode = resp.StatusCode
-		if readErr != nil {
-			result.Body = readErr.Error()
-		} else {
-			result.Body = string(body)
-		}
-		responses = append(responses, result)
 	}
 	return responses
+}
+
+func headerSnapshot(headers http.Header) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(headers))
+	for key, values := range headers {
+		switch {
+		case strings.EqualFold(key, "Set-Cookie"), strings.EqualFold(key, "Cookie"), strings.EqualFold(key, "Authorization"), strings.EqualFold(key, "Proxy-Authorization"):
+			out[key] = "<redacted>"
+		default:
+			out[key] = strings.Join(values, ", ")
+		}
+	}
+	return out
+}
+
+type jobGetVariant struct {
+	Name     string
+	Snapshot map[string]string
+	Apply    func(*http.Request)
+}
+
+func jobGetVariants(session Session) []jobGetVariant {
+	baseSnapshot := map[string]string{
+		"Cookie":           redactCookie(session.Cookie),
+		"SessionLoginPath": session.LoginPath,
+	}
+	withBase := func(extra map[string]string) map[string]string {
+		out := make(map[string]string, len(baseSnapshot)+len(extra))
+		for key, value := range baseSnapshot {
+			out[key] = value
+		}
+		for key, value := range extra {
+			out[key] = value
+		}
+		return out
+	}
+	return []jobGetVariant{
+		{
+			Name:     "go-cookie-only",
+			Snapshot: withBase(map[string]string{"User-Agent": "<suppressed>"}),
+			Apply: func(req *http.Request) {
+				req.Header.Set("Cookie", session.Cookie)
+				req.Header["User-Agent"] = nil
+			},
+		},
+		{
+			Name:     "accept-star",
+			Snapshot: withBase(map[string]string{"Accept": "*/*", "User-Agent": "<suppressed>"}),
+			Apply: func(req *http.Request) {
+				req.Header.Set("Cookie", session.Cookie)
+				req.Header.Set("Accept", "*/*")
+				req.Header["User-Agent"] = nil
+			},
+		},
+		{
+			Name:     "postman-runtime",
+			Snapshot: withBase(map[string]string{"Accept": "*/*", "User-Agent": "PostmanRuntime/7.51.1", "Postman-Token": "api-automation-readback"}),
+			Apply: func(req *http.Request) {
+				req.Header.Set("Cookie", session.Cookie)
+				req.Header.Set("Accept", "*/*")
+				req.Header.Set("User-Agent", "PostmanRuntime/7.51.1")
+				req.Header.Set("Postman-Token", "api-automation-readback")
+			},
+		},
+	}
+}
+
+func redactCookie(cookie string) string {
+	parts := strings.Split(cookie, ";")
+	for i, part := range parts {
+		name, _, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if ok && name != "" {
+			parts[i] = name + "=<redacted>"
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 func (c *Client) getJobAttributesAt(ctx context.Context, session Session, apiPath, jobID, suffix string) (map[string]string, error) {
@@ -325,7 +457,10 @@ func (c *Client) getJobAttributesAt(ctx context.Context, session Session, apiPat
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	if readErr != nil {
+		return nil, fmt.Errorf("read job response from %s/jobs/%s%s: %w", apiPath, jobID, suffix, readErr)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("get job %s/jobs/%s%s failed with HTTP %d: %s", apiPath, jobID, suffix, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -371,38 +506,58 @@ func (c *Client) updateJobAttributes(ctx context.Context, session Session, apiPa
 		return err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	if readErr != nil {
+		return fmt.Errorf("read job attribute update response: %w", readErr)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("job attribute update %s %s/jobs/%s failed with HTTP %d: %s", method, apiPath, jobID, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
 }
 
-func (c *Client) WaitJobAttribute(ctx context.Context, session Session, jobID, key, want string, timeout, interval time.Duration) error {
-	if timeout <= 0 {
-		timeout = 2 * time.Minute
+// CancelJob requests the REST job-action mapping for Fiery's cancel action.
+// The server remains authoritative about whether the job's current state can
+// be cancelled.
+func (c *Client) CancelJob(ctx context.Context, session Session, jobID string) error {
+	return c.JobAction(ctx, session, jobID, "cancel")
+}
+
+// DeleteJob permanently removes a job. EFI's supplied example confirms the v4
+// DELETE route; v5 is retained as a compatibility fallback.
+func (c *Client) DeleteJob(ctx context.Context, session Session, jobID string) error {
+	if err := c.deleteJob(ctx, session, apiV4, jobID); err == nil {
+		return nil
+	} else if fallbackErr := c.deleteJob(ctx, session, apiV5, jobID); fallbackErr != nil {
+		return fmt.Errorf("v4 delete job failed: %w; v5 delete job failed: %w", err, fallbackErr)
 	}
-	if interval <= 0 {
-		interval = 2 * time.Second
+	return nil
+}
+
+func (c *Client) deleteJob(ctx context.Context, session Session, apiPath, jobID string) error {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return errors.New("job ID is required")
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		attrs, err := c.GetJobAttributes(ctx, session, jobID)
-		if err == nil && strings.EqualFold(strings.TrimSpace(attrs[key]), strings.TrimSpace(want)) {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			if err != nil {
-				return fmt.Errorf("wait for job %s %s=%q timed out after %s; last GET error: %w", jobID, key, want, timeout, err)
-			}
-			return fmt.Errorf("wait for job %s %s=%q timed out after %s", jobID, key, want, timeout)
-		case <-ticker.C:
-		}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+apiPath+"/jobs/"+url.PathEscape(jobID), nil)
+	if err != nil {
+		return err
 	}
+	req.Header.Set("Cookie", session.Cookie)
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete job request: %w", err)
+	}
+	defer resp.Body.Close()
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	if readErr != nil {
+		return fmt.Errorf("read delete job response: %w", readErr)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("delete job at %s/jobs/%s failed with HTTP %d: %s", apiPath, jobID, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
 }
 
 func (c *Client) JobAction(ctx context.Context, session Session, jobID, action string) error {
@@ -431,8 +586,12 @@ func (c *Client) jobAction(ctx context.Context, session Session, apiPath, jobID,
 		return err
 	}
 	defer resp.Body.Close()
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	if readErr != nil {
+		return fmt.Errorf("read job action %q response: %w", action, readErr)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("job action %q failed with HTTP %d", action, resp.StatusCode)
+		return fmt.Errorf("job action %q failed with HTTP %d: %s", action, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
 }
@@ -515,17 +674,6 @@ func wrappedAttributeValue(value any) bool {
 	_, hasName := m["name"]
 	_, hasID := m["id"]
 	return hasValue || hasName || hasID
-}
-
-func collectAnyMap(out map[string]string, value any) {
-	collectAttributeTree(out, value)
-}
-
-func asStringAnyMap(value any) (map[string]any, bool) {
-	if typed, ok := value.(map[string]any); ok {
-		return typed, true
-	}
-	return nil, false
 }
 
 func truncateForError(body []byte, max int) string {

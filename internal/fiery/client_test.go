@@ -3,6 +3,7 @@ package fiery
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -51,6 +52,115 @@ func TestImportJobFallsBackToV4(t *testing.T) {
 	}
 }
 
+func TestCancelAndDeleteJobUseFieryJobRoutes(t *testing.T) {
+	var sawCancel, sawDelete bool
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == apiV4+"/jobs/JOB-123/cancel":
+			sawCancel = true
+		case r.Method == http.MethodDelete && r.URL.Path == apiV4+"/jobs/JOB-123":
+			sawDelete = true
+		default:
+			t.Fatalf("unexpected job operation: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Cookie"); got != "session=abc" {
+			t.Fatalf("cookie = %q", got)
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	client, err := New(Config{ServerIP: srv.URL, SecretKey: "secret", Password: "password", InsecureTLS: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := Session{Cookie: "session=abc"}
+	if err := client.CancelJob(context.Background(), session, "JOB-123"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DeleteJob(context.Background(), session, "JOB-123"); err != nil {
+		t.Fatal(err)
+	}
+	if !sawCancel || !sawDelete {
+		t.Fatalf("sawCancel=%v sawDelete=%v", sawCancel, sawDelete)
+	}
+}
+
+func TestDeleteJobFallsBackToV5(t *testing.T) {
+	var sawV5 bool
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == apiV4+"/jobs/JOB-123" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodDelete || r.URL.Path != apiV5+"/jobs/JOB-123" {
+			t.Fatalf("unexpected job operation: %s %s", r.Method, r.URL.Path)
+		}
+		sawV5 = true
+	}))
+	defer srv.Close()
+	client, err := New(Config{ServerIP: srv.URL, SecretKey: "secret", Password: "password", InsecureTLS: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DeleteJob(context.Background(), Session{Cookie: "session=abc"}, "JOB-123"); err != nil {
+		t.Fatal(err)
+	}
+	if !sawV5 {
+		t.Fatal("v5 fallback was not called")
+	}
+}
+
+func TestNewRejectsUnsafeOrMalformedServerURLs(t *testing.T) {
+	for _, server := range []string{
+		"ftp://server.example",
+		"https://user:password@server.example",
+		"https://server.example/unexpected/path",
+		"https://server.example?query=value",
+	} {
+		t.Run(server, func(t *testing.T) {
+			if _, err := New(Config{ServerIP: server, SecretKey: "secret", Password: "password"}); err == nil {
+				t.Fatalf("New accepted invalid server URL %q", server)
+			}
+		})
+	}
+}
+
+func TestNewNormalizesServerURL(t *testing.T) {
+	client, err := New(Config{ServerIP: "HTTPS://server.example/", SecretKey: "secret", Password: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.baseURL != "https://server.example" {
+		t.Fatalf("base URL = %q", client.baseURL)
+	}
+}
+
+func TestHeaderSnapshotRedactsCredentialHeaders(t *testing.T) {
+	snapshot := headerSnapshot(http.Header{
+		"Set-Cookie":    []string{"session=sensitive; Path=/"},
+		"Authorization": []string{"Bearer sensitive"},
+		"Content-Type":  []string{"application/json"},
+	})
+	if snapshot["Set-Cookie"] != "<redacted>" || snapshot["Authorization"] != "<redacted>" {
+		t.Fatalf("credential headers were not redacted: %#v", snapshot)
+	}
+	if snapshot["Content-Type"] != "application/json" {
+		t.Fatalf("non-sensitive header missing: %#v", snapshot)
+	}
+}
+
+func TestLoginPayloadUsesVersionSpecificAPIKeyField(t *testing.T) {
+	client := &Client{cfg: Config{Username: "admin", Password: "password", SecretKey: "secret"}}
+	v5 := client.loginPayload(apiV5)
+	if v5["apikey"] != "secret" || v5["accessrights"] != "" {
+		t.Fatalf("unexpected v5 payload: %#v", v5)
+	}
+	v4 := client.loginPayload(apiV4)
+	if v4["accessrights"] != "secret" || v4["apikey"] != "" {
+		t.Fatalf("unexpected v4 payload: %#v", v4)
+	}
+}
+
 func TestLoginAndImportJob(t *testing.T) {
 	var sawLogin bool
 	var sawImport bool
@@ -66,8 +176,11 @@ func TestLoginAndImportJob(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				t.Fatal(err)
 			}
-			if payload["username"] != DefaultUsername || payload["password"] != "password" || payload["accessrights"] != "secret" {
-				t.Fatalf("unexpected login payload: %#v", payload)
+			if payload["username"] != DefaultUsername || payload["password"] != "password" || payload["apikey"] != "secret" {
+				t.Fatalf("unexpected v5 login payload: %#v", payload)
+			}
+			if _, legacy := payload["accessrights"]; legacy {
+				t.Fatalf("v5 login unexpectedly used legacy accessrights: %#v", payload)
 			}
 			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
 			_, _ = w.Write([]byte(`{"data":{"item":{"authenticated":true}}}`))
@@ -89,11 +202,23 @@ func TestLoginAndImportJob(t *testing.T) {
 			if got := r.Header.Get("Cookie"); got != "session=abc" {
 				t.Fatalf("cookie = %q", got)
 			}
+			if r.ContentLength <= int64(len("pdf")) {
+				t.Fatalf("streaming multipart content length = %d", r.ContentLength)
+			}
 			if err := r.ParseMultipartForm(1024 * 1024); err != nil {
 				t.Fatal(err)
 			}
 			if got := r.FormValue("queue"); got != "hold" {
 				t.Fatalf("queue = %q", got)
+			}
+			uploaded, _, err := r.FormFile("file")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer uploaded.Close()
+			contents, err := io.ReadAll(uploaded)
+			if err != nil || string(contents) != "pdf" {
+				t.Fatalf("uploaded file = %q, err=%v", contents, err)
 			}
 			_, _ = w.Write([]byte(`{"data":{"item":{"id":"JOB-123"}}}`))
 		default:

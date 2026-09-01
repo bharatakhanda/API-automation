@@ -6,19 +6,20 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
-func TestDiscoverV5CapturesOnlyV5Endpoints(t *testing.T) {
+func TestDiscoverCapabilitiesCapturesAllEndpointsInStableOrder(t *testing.T) {
 	seen := map[string]bool{}
+	var mu sync.Mutex
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Cookie") != "session=abc" {
-			t.Fatalf("missing session cookie")
+			t.Errorf("missing session cookie")
 		}
-		if len(r.URL.Path) < len(apiV5) || r.URL.Path[:len(apiV5)] != apiV5 {
-			t.Fatalf("non-v5 endpoint requested: %s", r.URL.Path)
-		}
+		mu.Lock()
 		seen[r.URL.Path] = true
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -28,15 +29,21 @@ func TestDiscoverV5CapturesOnlyV5Endpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot := client.DiscoverV5(context.Background(), Session{Cookie: "session=abc"})
-	if snapshot.APIVersion != "v5" {
+	snapshot := client.DiscoverCapabilities(context.Background(), Session{Cookie: "session=abc"})
+	if snapshot.APIVersion != "v5+v4" {
 		t.Fatalf("api version = %q", snapshot.APIVersion)
 	}
-	if len(snapshot.Endpoints) != len(V5DiscoveryEndpoints) {
-		t.Fatalf("endpoint count = %d, want %d", len(snapshot.Endpoints), len(V5DiscoveryEndpoints))
+	if len(snapshot.Endpoints) != len(capabilityDiscoveryEndpoints) {
+		t.Fatalf("endpoint count = %d, want %d", len(snapshot.Endpoints), len(capabilityDiscoveryEndpoints))
 	}
-	for _, endpoint := range V5DiscoveryEndpoints {
-		if !seen[endpoint.Path] {
+	for index, endpoint := range capabilityDiscoveryEndpoints {
+		if snapshot.Endpoints[index].Path != endpoint.Path {
+			t.Fatalf("endpoint %d path = %q, want %q", index, snapshot.Endpoints[index].Path, endpoint.Path)
+		}
+		mu.Lock()
+		wasSeen := seen[endpoint.Path]
+		mu.Unlock()
+		if !wasSeen {
 			t.Fatalf("endpoint not requested: %s", endpoint.Path)
 		}
 	}

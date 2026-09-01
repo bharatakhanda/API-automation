@@ -9,10 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
-var V5DiscoveryEndpoints = []DiscoveryEndpoint{
+var v5DiscoveryEndpoints = []DiscoveryEndpoint{
 	{Name: "v5_info", Method: http.MethodGet, Path: apiV5 + "/info"},
 	{Name: "v5_properties", Method: http.MethodGet, Path: apiV5 + "/properties"},
 	{Name: "v5_jobs", Method: http.MethodGet, Path: apiV5 + "/jobs"},
@@ -24,7 +25,7 @@ var V5DiscoveryEndpoints = []DiscoveryEndpoint{
 	{Name: "v5_status", Method: http.MethodGet, Path: apiV5 + "/status"},
 }
 
-var V4DiscoveryEndpoints = []DiscoveryEndpoint{
+var v4DiscoveryEndpoints = []DiscoveryEndpoint{
 	{Name: "v4_info", Method: http.MethodGet, Path: apiV4 + "/info"},
 	{Name: "v4_status", Method: http.MethodGet, Path: apiV4 + "/status"},
 	{Name: "v4_features", Method: http.MethodGet, Path: apiV4 + "/features"},
@@ -32,7 +33,7 @@ var V4DiscoveryEndpoints = []DiscoveryEndpoint{
 	{Name: "v4_papercatalog", Method: http.MethodGet, Path: apiV4 + "/papercatalog"},
 }
 
-var CapabilityDiscoveryEndpoints = append(append([]DiscoveryEndpoint{}, V5DiscoveryEndpoints...), V4DiscoveryEndpoints...)
+var capabilityDiscoveryEndpoints = append(append([]DiscoveryEndpoint{}, v5DiscoveryEndpoints...), v4DiscoveryEndpoints...)
 
 type DiscoveryEndpoint struct {
 	Name   string `json:"name"`
@@ -58,12 +59,8 @@ type EndpointSnapshot struct {
 	Error      string          `json:"error,omitempty"`
 }
 
-func (c *Client) DiscoverV5(ctx context.Context, session Session) CapabilitySnapshot {
-	return c.discover(ctx, session, "v5", V5DiscoveryEndpoints)
-}
-
 func (c *Client) DiscoverCapabilities(ctx context.Context, session Session) CapabilitySnapshot {
-	return c.discover(ctx, session, "v5+v4", CapabilityDiscoveryEndpoints)
+	return c.discover(ctx, session, "v5+v4", capabilityDiscoveryEndpoints)
 }
 
 func (c *Client) discover(ctx context.Context, session Session, apiVersion string, endpoints []DiscoveryEndpoint) CapabilitySnapshot {
@@ -71,11 +68,32 @@ func (c *Client) discover(ctx context.Context, session Session, apiVersion strin
 		CapturedAt: time.Now().UTC(),
 		Server:     c.baseURL,
 		APIVersion: apiVersion,
-		Endpoints:  make([]EndpointSnapshot, 0, len(endpoints)),
+		Endpoints:  make([]EndpointSnapshot, len(endpoints)),
 	}
-	for _, endpoint := range endpoints {
-		snapshot.Endpoints = append(snapshot.Endpoints, c.discoverEndpoint(ctx, session, endpoint))
+	if len(endpoints) == 0 {
+		return snapshot
 	}
+
+	// Keep endpoint order stable in the snapshot while bounding concurrent I/O.
+	// Missing/slow compatibility endpoints no longer block every other probe.
+	const maxDiscoveryWorkers = 4
+	workerCount := min(maxDiscoveryWorkers, len(endpoints))
+	jobs := make(chan int, len(endpoints))
+	var workers sync.WaitGroup
+	for range workerCount {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for index := range jobs {
+				snapshot.Endpoints[index] = c.discoverEndpoint(ctx, session, endpoints[index])
+			}
+		}()
+	}
+	for index := range endpoints {
+		jobs <- index
+	}
+	close(jobs)
+	workers.Wait()
 	return snapshot
 }
 
