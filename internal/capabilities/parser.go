@@ -24,6 +24,7 @@ var importantPropertyLabels = map[string]string{
 	"EFPageDelivery":            "Output delivery",
 	"EFSort":                    "Collate setting",
 	"EFPrintCover":              "Cover page",
+	"EFPageRange":               "Page range",
 	"EFRotateDocument":          "Rotation angle",
 	"EFOutputCentering":         "Origin",
 	"EFBrightness":              "Brightness",

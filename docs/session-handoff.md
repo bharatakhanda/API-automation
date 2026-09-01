@@ -14,7 +14,7 @@ Updated: 2026-09-01
 
 ## Git state at handoff
 
-- Local `main` is ahead of `origin/main` (`e0999b0`) by 7 commits, including this handoff update.
+- Local `main` is ahead of `origin/main` (`e0999b0`) by 8 commits, including the custom page-range update.
 - Latest implementation commit: `8469edb feat: add feature tabs search ranges presets and lifecycle results`
 - Implementation commits:
   - `1d4044a feat: add categorized constraint-aware capability metadata`
@@ -34,6 +34,7 @@ Updated: 2026-09-01
 - Common aliases are deduplicated while preserving exact server IDs for updates and readback.
 - `efirange` metadata retains min, max, increment, and precision and renders as a validated numeric field rather than checkboxes.
 - Numeric fields accept one value, comma-separated values, or inclusive ranges and remain bounded by 10,000 expanded values and Max cases.
+- `EFPageRange=Range1` is rendered as a custom text field, not a checkbox. It accepts `1,3,5-8` / `5 to 8`, sends normalized `DPP_PAGE_RANGE`, and validates against each imported file's reported original page count after spooling.
 - Copies remains independently validated from 1 through 9999.
 - Scale is optional and blank by default. A discovered `Scaling`/`EFScale` property is authoritative; otherwise a standard optional `Scaling` input is available and Fiery's update response remains authoritative.
 
@@ -80,7 +81,7 @@ The following passed after implementation:
 
 Built executable SHA-256:
 
-`166f875dc22e36ff1f87059e73fcabb1cbbc72e536e448963404f2e21738377a`
+`6d10150547ca8de75d0e577647e7f581f0a5c6c84ed2fd05904223ab3bccaa5f`
 
 ## Recommended next action
 
@@ -90,6 +91,7 @@ Run a small live Fiery validation before a high-concurrency campaign:
 2. Save and reload one local preset, then reconnect to a different Fiery or discovery snapshot to confirm stale-value reconciliation.
 3. Run one known-success TIFF/PDF in Process and Hold and confirm lifecycle PASS includes processed/raster evidence.
 4. Run known-failure XPS and invalid-paper cases and confirm they FAIL with the Fiery processing error even if selected settings read back.
-5. Run a constrained pair in a low Max-cases test and confirm local skipped-count reporting plus server constraint validation.
-6. Inspect diagnostic JSON, API trace, JSONL, and Excel lifecycle columns for agreement.
-7. Increase worker count only after the small run is stable.
+5. On a known multi-page PDF, enter a custom page range such as `1,3,5-8`; confirm the job receives `EFPageRange=Range1` plus `DPP_PAGE_RANGE`, and confirm a page beyond the original count fails before update.
+6. Run a constrained pair in a low Max-cases test and confirm local skipped-count reporting plus server constraint validation.
+7. Inspect diagnostic JSON, API trace, JSONL, and Excel lifecycle columns for agreement.
+8. Increase worker count only after the small run is stable.

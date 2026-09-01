@@ -29,6 +29,7 @@ The current shell uses:
 - Select all controls on both category headings and individual capability headings; numeric/range fields are not changed by these checkboxes,
 - validated numeric inputs for server-advertised `efirange` properties and optional Scale, accepting one value, comma-separated values, and inclusive ranges,
 - a Copies text field accepting comma-separated values and inclusive `5-10` / `5 to 10` ranges from 1 through 9999 while respecting the independently configured Max cases limit,
+- a custom Page range text field in place of Fiery's `Range1` checkbox placeholder; it accepts `1,3,5-8` / `5 to 8`, remains one page-selection setting, and is validated per imported file against the original page count,
 - local reusable presets for selections, numeric values, generation settings, and run modes; credentials and file paths are excluded,
 - separate confirmed Cancel job and Delete job controls on Results; cancel accepts processing/ripping, waiting-to-print, and printing states while delete accepts any state,
 - dedicated Cancel-while-Processing/Ripping, Cancel-while-Waiting-to-Print, Cancel-while-Printing, and Delete run modes that each create a separate job and use condition-based state waits,

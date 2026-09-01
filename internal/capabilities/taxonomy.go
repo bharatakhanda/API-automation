@@ -40,6 +40,7 @@ var canonicalLabels = map[string]string{
 	"EFCopies":                  "Copies",
 	"num copies":                "Copies",
 	"EFPrintCover":              "Cover page",
+	"EFPageRange":               "Page range",
 	"EFRotateDocument":          "Rotation",
 	"EFRotation":                "Rotation",
 	"Scaling":                   "Scale (%)",

@@ -137,6 +137,7 @@ func TestResetSelectionsRestoresAutomationDefaults(t *testing.T) {
 		modeChecks:   []widget.Bool{{Value: false}, {Value: true}},
 	}
 	window.copiesInput.SetText("5-10")
+	window.pageRangeInput.SetText("1,3-5")
 	window.workers.SetText("1000")
 	window.maxCases.SetText("999")
 	window.fileModeGroup.Value = "single"
@@ -145,8 +146,8 @@ func TestResetSelectionsRestoresAutomationDefaults(t *testing.T) {
 	if window.selected["EFResolution"]["360x720dpi"].Value || window.groupChecks["Print"].Value || window.optionChecks["EFResolution"].Value {
 		t.Fatal("checkbox selections were not cleared")
 	}
-	if window.strategy != combinations.StrategySelected || window.copiesInput.Text() != "1" || window.workers.Text() != "1" || window.maxCases.Text() != "100" {
-		t.Fatalf("defaults not restored: strategy=%s copies=%q workers=%q cases=%q", window.strategy, window.copiesInput.Text(), window.workers.Text(), window.maxCases.Text())
+	if window.strategy != combinations.StrategySelected || window.copiesInput.Text() != "1" || window.pageRangeInput.Text() != "" || window.workers.Text() != "1" || window.maxCases.Text() != "100" {
+		t.Fatalf("defaults not restored: strategy=%s copies=%q pageRange=%q workers=%q cases=%q", window.strategy, window.copiesInput.Text(), window.pageRangeInput.Text(), window.workers.Text(), window.maxCases.Text())
 	}
 	if window.fileModeGroup.Value != "all" || !window.modeChecks[0].Value || window.modeChecks[1].Value || window.jobActionID.Text() != "" {
 		t.Fatal("file mode, run modes, or job ID were not reset")
@@ -178,11 +179,12 @@ func TestLoadPresetRestoresSafeSettingsAndPreservesCredentials(t *testing.T) {
 			{ID: "EFColorMode", Values: []string{"CMYK", "Grayscale"}},
 			{ID: "num copies", Range: &capabilities.NumericRange{Min: 1, Max: 9999, Increment: 1}},
 			{ID: "Scaling", Range: &capabilities.NumericRange{Min: 25, Max: 400, Increment: 1}},
+			{ID: pageRangeOptionID, Values: []string{"All", "Odd", "Even", pageRangeCustomServerValue}},
 		}},
 		presetList: []presets.Preset{{
 			Name: "Production", ServerSerial: "SERVER-1",
 			SelectedValues: map[string][]string{"EFColorMode": {"CMYK"}},
-			NumericInputs:  map[string]string{"num copies": "5-7", "Scaling": "100"},
+			NumericInputs:  map[string]string{"num copies": "5-7", "Scaling": "100", pageRangeDataID: "1,3-5"},
 			Strategy:       "pairwise", MaxCases: "250", ParallelJobs: "8", RunModes: []string{"Process and Hold"}, FileMode: "random",
 		}},
 		modeChecks: make([]widget.Bool, len(runModes)),
@@ -192,14 +194,63 @@ func TestLoadPresetRestoresSafeSettingsAndPreservesCredentials(t *testing.T) {
 	window.password.SetText("password-not-saved-in-preset")
 	window.presetName.SetText("Production")
 	window.loadNamedPreset()
-	if !window.selected["EFColorMode"]["CMYK"].Value || window.copiesInput.Text() != "5-7" || window.numericInputs["Scaling"].Text() != "100" {
-		t.Fatalf("preset values were not restored: selected=%#v copies=%q scale=%q", window.selected, window.copiesInput.Text(), window.numericInputs["Scaling"].Text())
+	if !window.selected["EFColorMode"]["CMYK"].Value || window.copiesInput.Text() != "5-7" || window.numericInputs["Scaling"].Text() != "100" || window.pageRangeInput.Text() != "1,3-5" {
+		t.Fatalf("preset values were not restored: selected=%#v copies=%q scale=%q pageRange=%q", window.selected, window.copiesInput.Text(), window.numericInputs["Scaling"].Text(), window.pageRangeInput.Text())
 	}
 	if window.strategy != combinations.StrategyPairwise || window.maxCases.Text() != "250" || window.workers.Text() != "8" || window.fileModeGroup.Value != "random" || !window.modeChecks[1].Value {
 		t.Fatal("preset execution controls were not restored")
 	}
 	if window.serverIP.Text() != "server.example" || window.secretKey.Text() != "secret-not-saved-in-preset" || window.password.Text() != "password-not-saved-in-preset" {
 		t.Fatal("loading a preset changed connection credentials")
+	}
+}
+
+func TestCustomPageRangeUsesTextFieldAndValidatesImportedPageCount(t *testing.T) {
+	window := &Window{
+		selected: map[string]map[string]*widget.Bool{pageRangeOptionID: {
+			"All": {Value: false}, "Odd": {Value: false}, "Even": {Value: false}, pageRangeCustomServerValue: {Value: true},
+		}},
+		capabilities: capabilities.Model{Options: []capabilities.Option{
+			{ID: pageRangeOptionID, Label: "Page range", Value: "All", Values: []string{"All", "Odd", "Even", pageRangeCustomServerValue}},
+			{ID: "num copies", Label: "Copies", Value: "1"},
+		}},
+		strategy: combinations.StrategySelected,
+	}
+	window.copiesInput.SetText("1")
+	window.pageRangeInput.SetText("1,3,5-7")
+	generated, _, err := window.selectedCombinations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(generated) != 1 {
+		t.Fatalf("generated combinations = %#v", generated)
+	}
+	attributes := combinationToAttributes(generated[0])
+	if attributes[pageRangeOptionID] != pageRangeCustomServerValue || attributes[pageRangeDataID] != "1,3,5-7" {
+		t.Fatalf("custom page-range attributes = %#v", attributes)
+	}
+	if err := validateCustomPageRange(attributes, map[string]string{"OrigPageCount": "7"}); err != nil {
+		t.Fatalf("valid page range failed: %v", err)
+	}
+	if err := validateCustomPageRange(attributes, map[string]string{"OrigPageCount": "6"}); err == nil {
+		t.Fatal("page range beyond the imported file unexpectedly passed")
+	}
+	if values := checkboxOptionValues(window.capabilities.Options[0]); len(values) != 3 || containsStringFold(values, pageRangeCustomServerValue) {
+		t.Fatalf("Range1 placeholder remained a checkbox: %v", values)
+	}
+	got := map[string]string{pageRangeDataID: "1,3,5,6,7"}
+	if !window.attributesMatch(got, attributes) {
+		t.Fatalf("semantic page-range readback did not match: got=%#v expected=%#v", got, attributes)
+	}
+}
+
+func TestImportedFilePageCountPrefersOriginalDocumentCount(t *testing.T) {
+	count, ok := importedFilePageCount(map[string]string{"OrigPageCount": "10", "num pages": "12"})
+	if !ok || count != 10 {
+		t.Fatalf("page count = %d, %t; want original count 10", count, ok)
+	}
+	if _, ok := importedFilePageCount(map[string]string{"num pages": "0"}); ok {
+		t.Fatal("zero page count unexpectedly accepted")
 	}
 }
 

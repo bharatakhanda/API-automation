@@ -15,6 +15,7 @@ Windows desktop automation for Fiery job import, lifecycle execution, attribute 
 - Provides feature search plus header Reset and category/capability-level Select all controls for discovered checkbox values.
 - Renders Fiery `efirange` properties as validated numeric inputs using server min/max/increment/precision metadata, provides optional Scale input, and accepts single values, comma-separated values, or inclusive ranges.
 - Accepts Copies as individual values or inclusive ranges from 1 through 9999 and feeds them into selected, permutation, and pairwise generation while respecting Max cases.
+- Renders Fiery `EFPageRange=Range1` as a custom page-range text field instead of a checkbox. Inputs such as `1,3,5-8` are normalized and validated against each imported file's original page count before the job update.
 - Saves reusable local settings presets without credentials or file paths and validates restored values against the currently connected Fiery.
 - Filters explicit local conflicts using discovered constraint metadata and performs a cached, job-specific Fiery constraint check before applying constrained settings when the endpoint is supported.
 - Provides confirmed manual job actions plus separate Cancel-while-Processing/Ripping, Cancel-while-Waiting-to-Print, Cancel-while-Printing, and Delete automation modes; each selected mode imports its own job.

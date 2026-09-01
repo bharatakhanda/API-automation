@@ -28,6 +28,7 @@ import (
 	"api-automation/internal/files"
 	"api-automation/internal/joboutcome"
 	"api-automation/internal/model"
+	"api-automation/internal/pagevalues"
 	"api-automation/internal/preflight"
 	"api-automation/internal/presets"
 	"api-automation/internal/rangevalues"
@@ -46,6 +47,11 @@ import (
 )
 
 const (
+	pageRangeOptionID          = "EFPageRange"
+	pageRangeDataID            = "DPP_PAGE_RANGE"
+	pageRangeCustomServerValue = "Range1"
+	pageRangeInternalPrefix    = "__API_AUTOMATION_CUSTOM_PAGE_RANGE__:"
+
 	defaultCaseLimit       = 100
 	maxCaseLimit           = 10_000
 	maxWorkerCount         = 1000
@@ -88,7 +94,8 @@ type Window struct {
 	serverIP, secretKey, password widget.Editor
 	folderPath, filePath          widget.Editor
 	workers, maxCases             widget.Editor
-	copiesInput, jobActionID      widget.Editor
+	copiesInput, pageRangeInput   widget.Editor
+	jobActionID                   widget.Editor
 	capabilitySearch, presetName  widget.Editor
 
 	captureButton, runButton, cancelButton, resetButton    widget.Clickable
@@ -227,6 +234,7 @@ func New() *Window {
 	initEditor(&w.workers, "1")
 	initEditor(&w.maxCases, "100")
 	initEditor(&w.copiesInput, "1")
+	initEditor(&w.pageRangeInput, "")
 	initEditor(&w.jobActionID, "")
 	initEditor(&w.capabilitySearch, "")
 	initEditor(&w.presetName, "")
@@ -459,6 +467,7 @@ func (w *Window) resetSelections() {
 	}
 	w.strategy = combinations.StrategySelected
 	w.copiesInput.SetText("1")
+	w.pageRangeInput.SetText("")
 	for _, input := range w.numericInputs {
 		input.SetText("")
 	}
@@ -472,7 +481,7 @@ func (w *Window) resetSelections() {
 	}
 	w.jobActionID.SetText("")
 	w.setStatus("Selections reset to defaults. Server details, discovered capabilities, and file paths were preserved.")
-	w.addLog("Reset capability selections, Copies, strategy, run modes, parallel jobs, and case limit to defaults")
+	w.addLog("Reset capability selections, Copies, custom page range, strategy, run modes, parallel jobs, and case limit to defaults")
 }
 
 func (w *Window) setActivePage(page int) {
@@ -897,7 +906,7 @@ func (w *Window) groupSelectionState(group capabilities.OptionGroup) (bool, int)
 		if isCopiesOption(option.ID) || option.Range != nil {
 			continue
 		}
-		values := optionValues(option)
+		values := checkboxOptionValues(option)
 		ensureBools(w.selected, option.ID, values)
 		for _, value := range values {
 			selectableCount++
@@ -914,7 +923,7 @@ func (w *Window) setGroupSelection(group capabilities.OptionGroup, selected bool
 		if isCopiesOption(option.ID) || option.Range != nil {
 			continue
 		}
-		values := optionValues(option)
+		values := checkboxOptionValues(option)
 		ensureBools(w.selected, option.ID, values)
 		for _, value := range values {
 			w.selected[option.ID][value].Value = selected
@@ -929,6 +938,9 @@ func (w *Window) setGroupSelection(group capabilities.OptionGroup, selected bool
 func (w *Window) optionRow(gtx layout.Context, opt capabilities.Option) layout.Dimensions {
 	if isCopiesOption(opt.ID) {
 		return w.copiesOptionRow(gtx, opt)
+	}
+	if isPageRangeOption(opt.ID) {
+		return w.pageRangeOptionRow(gtx, opt)
 	}
 	if opt.Range != nil {
 		return w.numericOptionRow(gtx, opt)
@@ -1017,6 +1029,43 @@ func (w *Window) headerCheckbox(store map[string]*widget.Bool, key string) *widg
 	return store[key]
 }
 
+func (w *Window) pageRangeOptionRow(gtx layout.Context, opt capabilities.Option) layout.Dimensions {
+	values := checkboxOptionValues(opt)
+	ensureBools(w.selected, opt.ID, values)
+	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+		items := []layout.FlexChild{
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionHeader(gtx, opt, values) }),
+			layout.Rigid(spacer(3)),
+			layout.Rigid(label(w.theme, fmt.Sprintf("%s · modes: All, Odd, Even · default: %s", opt.ID, fallback(opt.Value, "not reported")), 12, palette.muted).Layout),
+			layout.Rigid(spacer(7)),
+		}
+		for _, value := range values {
+			value := value
+			checkbox := w.selected[opt.ID][value]
+			displayValue := value
+			if value == opt.Value {
+				displayValue += "  · default"
+			}
+			items = append(items, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Bottom: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					control := material.CheckBox(w.theme, checkbox, displayValue)
+					control.Color = palette.primary
+					return control.Layout(gtx)
+				})
+			}))
+		}
+		items = append(items,
+			layout.Rigid(spacer(5)),
+			layout.Rigid(label(w.theme, "Custom page range", 14, palette.text).Layout),
+			layout.Rigid(spacer(3)),
+			layout.Rigid(label(w.theme, "Enter pages like Copies: 1,3,5-8 or 5 to 8. The range is one page-selection setting and is validated against each imported file's original page count. Leave blank to omit it.", 13, palette.muted).Layout),
+			layout.Rigid(spacer(7)),
+			layout.Rigid(fieldBox(w.theme, "Custom page range", "1,3,5-8", &w.pageRangeInput, 620)),
+		)
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, items...)
+	})
+}
+
 func (w *Window) numericOptionRow(gtx layout.Context, opt capabilities.Option) layout.Dimensions {
 	input := w.numericInput(opt.ID)
 	rangeInfo := fmt.Sprintf("allowed: %s to %s · increment %s", formatNumber(opt.Range.Min, opt.Range.Precision), formatNumber(opt.Range.Max, opt.Range.Precision), formatNumber(opt.Range.Increment, opt.Range.Precision))
@@ -1066,6 +1115,10 @@ func (w *Window) copiesOptionRow(gtx layout.Context, opt capabilities.Option) la
 
 func isCopiesOption(optionID string) bool {
 	return optionID == "num copies" || optionID == "EFCopies"
+}
+
+func isPageRangeOption(optionID string) bool {
+	return strings.EqualFold(strings.TrimSpace(optionID), pageRangeOptionID)
 }
 
 func (w *Window) resultsCard(gtx layout.Context) layout.Dimensions {
@@ -1552,12 +1605,19 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 		report.Stages = append(report.Stages, apiTraceStage{Name: name, Captured: time.Now().Format(time.RFC3339Nano), Responses: client.GetRawJobResponses(ctx, session, imp.JobID)})
 	}
 	capture("after import")
-	if _, err := w.waitJobCondition(ctx, client, session, imp.JobID, "done spooling before diagnostic update", 4*time.Minute, time.Second, statusEquals("done spooling")); err != nil {
+	spooled, err := w.waitJobCondition(ctx, client, session, imp.JobID, "done spooling before diagnostic update", 4*time.Minute, time.Second, statusEquals("done spooling"))
+	if err != nil {
 		report.Error = err.Error()
 		capture("spooling wait failed")
 		return report
 	}
 	capture("done spooling before update")
+	if err := validateCustomPageRange(attrs, spooled); err != nil {
+		report.Result = "FAIL"
+		report.Lifecycle = "Custom page range validation failed: " + err.Error()
+		capture("page range validation failed")
+		return report
+	}
 	w.mu.Lock()
 	capabilityModel := w.capabilities
 	w.mu.Unlock()
@@ -1850,6 +1910,10 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		finish("FAIL", fmt.Sprintf("mode=%s: job failed while spooling: %s", mode.Label, outcome.Summary()), spooled)
 		return
 	}
+	if err := validateCustomPageRange(attrs, spooled); err != nil {
+		finish("FAIL", fmt.Sprintf("mode=%s: custom page range is invalid for %s: %v", mode.Label, filepath.Base(file), err), spooled)
+		return
+	}
 	if len(attrs) > 0 {
 		w.mu.Lock()
 		capabilityModel := w.capabilities
@@ -1895,7 +1959,7 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 			return
 		}
 		for key, want := range attrs {
-			if !w.attributeValueMatches(key, got[key], want) {
+			if !w.attributeMapValueMatches(got, key, want) {
 				finish("FAIL", fmt.Sprintf("mode=%s: job deleted, but pre-delete verification failed for %s set=%q got=%q", mode.Label, key, want, got[key]), got)
 				return
 			}
@@ -1930,7 +1994,7 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		detail = fmt.Sprintf("mode=%s: lifecycle passed (%s); no job attributes were selected for set/get verification", mode.Label, outcome.Summary())
 	}
 	for k, v := range attrs {
-		if !w.attributeValueMatches(k, got[k], v) {
+		if !w.attributeMapValueMatches(got, k, v) {
 			status = "FAIL"
 			detail = fmt.Sprintf("mode=%s: %s set=%q got=%q status=%q state=%q display=%q recent=%q related=%s availableKeys=%s", mode.Label, k, v, got[k], got["status"], got["state"], got["display status"], got["recent action"], relatedReadbackValues(got), short(strings.Join(sortedKeys(got), ","), 220))
 			if requiresRipReadback(k) && !modeIncludesAction(mode, "rip") {
@@ -2040,13 +2104,51 @@ func (w *Window) logRawPostmanComparison(ctx context.Context, client *fiery.Clie
 	}
 }
 
+func validateCustomPageRange(attributes, jobAttributes map[string]string) error {
+	expression := strings.TrimSpace(attributes[pageRangeDataID])
+	if expression == "" {
+		return nil
+	}
+	selection, err := pagevalues.Parse(expression, pagevalues.DefaultExpansionLimit)
+	if err != nil {
+		return err
+	}
+	pageCount, ok := importedFilePageCount(jobAttributes)
+	if !ok {
+		return fmt.Errorf("fiery did not report the imported file's original page count after spooling")
+	}
+	return selection.ValidatePageCount(pageCount)
+}
+
+func importedFilePageCount(attributes map[string]string) (int, bool) {
+	for _, key := range []string{"OrigPageCount", "num document pages", "pqm num pages", "PGM num pages", "num pages"} {
+		value, err := strconv.Atoi(strings.TrimSpace(attributes[key]))
+		if err == nil && value > 0 {
+			return value, true
+		}
+	}
+	return 0, false
+}
+
 func (w *Window) attributesMatch(got, expected map[string]string) bool {
 	for key, want := range expected {
-		if !w.attributeValueMatches(key, got[key], want) {
+		if !w.attributeMapValueMatches(got, key, want) {
 			return false
 		}
 	}
 	return true
+}
+
+func (w *Window) attributeMapValueMatches(got map[string]string, key, want string) bool {
+	if strings.EqualFold(key, pageRangeDataID) {
+		return pagevalues.Equivalent(got[key], want)
+	}
+	if strings.EqualFold(key, pageRangeOptionID) && strings.EqualFold(want, pageRangeCustomServerValue) && strings.TrimSpace(got[key]) == "" {
+		// Some Fiery job GET variants expose only DPP_PAGE_RANGE for a custom
+		// range. A non-empty, separately verified DPP value proves Range1 mode.
+		return strings.TrimSpace(got[pageRangeDataID]) != ""
+	}
+	return w.attributeValueMatches(key, got[key], want)
 }
 
 func (w *Window) attributeValueMatches(key, got, want string) bool {
@@ -2393,28 +2495,57 @@ func (w *Window) selectedCombinations() ([]combinations.Combination, []combinati
 	model := w.capabilities
 	w.mu.Unlock()
 	axes := make([]combinations.Axis, 0, len(w.selected)+1)
-	ids := make([]string, 0, len(w.selected))
+	ids := make([]string, 0, len(w.selected)+1)
+	seenIDs := make(map[string]struct{}, len(w.selected)+1)
 	for id := range w.selected {
 		if !isCopiesOption(id) {
 			ids = append(ids, id)
+			seenIDs[id] = struct{}{}
+		}
+	}
+	if strings.TrimSpace(w.pageRangeInput.Text()) != "" {
+		if _, exists := model.OptionByID(pageRangeOptionID); !exists {
+			return nil, nil, fmt.Errorf("page range: the connected Fiery did not advertise %s", pageRangeOptionID)
+		} else if _, listed := seenIDs[pageRangeOptionID]; !listed {
+			ids = append(ids, pageRangeOptionID)
 		}
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		if _, exists := model.OptionByID(id); !exists {
+		option, exists := model.OptionByID(id)
+		if !exists {
 			continue
 		}
 		vals := selectedValues(w.selected[id])
-		if len(vals) == 0 {
-			continue
-		}
-		if w.strategy != combinations.StrategySelected {
-			if option, ok := model.OptionByID(id); ok {
-				allValues := optionValues(option)
-				if len(allValues) > len(vals) {
-					vals = allValues
+		if isPageRangeOption(id) {
+			filtered := vals[:0]
+			for _, value := range vals {
+				if !strings.EqualFold(strings.TrimSpace(value), pageRangeCustomServerValue) {
+					filtered = append(filtered, value)
 				}
 			}
+			vals = filtered
+			customInput := strings.TrimSpace(w.pageRangeInput.Text())
+			if customInput != "" {
+				selection, err := pagevalues.Parse(customInput, pagevalues.DefaultExpansionLimit)
+				if err != nil {
+					return nil, nil, fmt.Errorf("page range: %w", err)
+				}
+				if w.strategy != combinations.StrategySelected {
+					vals = append([]string(nil), checkboxOptionValues(option)...)
+				}
+				vals = append(vals, pageRangeInternalPrefix+selection.Normalized)
+			} else if len(vals) > 0 && w.strategy != combinations.StrategySelected {
+				vals = append([]string(nil), checkboxOptionValues(option)...)
+			}
+		} else if len(vals) > 0 && w.strategy != combinations.StrategySelected {
+			allValues := optionValues(option)
+			if len(allValues) > len(vals) {
+				vals = allValues
+			}
+		}
+		if len(vals) == 0 {
+			continue
 		}
 		sort.Strings(vals)
 		axes = append(axes, combinations.Axis{Name: id, Values: vals})
@@ -2479,7 +2610,7 @@ func (w *Window) selectedCombinations() ([]combinations.Combination, []combinati
 	w.constraintSkipped = 0
 	w.constraintWarning = ""
 	for _, combination := range generated {
-		conflicts := capabilities.ValidateCombination(model, combination)
+		conflicts := capabilities.ValidateCombination(model, combinationForConstraintValidation(combination))
 		if len(conflicts) > 0 {
 			w.constraintSkipped++
 			if w.constraintWarning == "" {
@@ -2516,7 +2647,15 @@ func (w *Window) logSelectedCombinations(combos []combinations.Combination, axes
 	}
 	selected := make([]string, 0, len(axes))
 	for _, axis := range axes {
-		selected = append(selected, fmt.Sprintf("%s=%v", axis.Name, axis.Values))
+		values := append([]string(nil), axis.Values...)
+		if isPageRangeOption(axis.Name) {
+			for index, value := range values {
+				if strings.HasPrefix(value, pageRangeInternalPrefix) {
+					values[index] = "Custom(" + strings.TrimPrefix(value, pageRangeInternalPrefix) + ")"
+				}
+			}
+		}
+		selected = append(selected, fmt.Sprintf("%s=%v", axis.Name, values))
 	}
 	if len(selected) == 0 {
 		w.addLog("Selected %d combination(s) for strategy=%s; no job attributes selected, running import/lifecycle only", len(combos), w.strategy)
@@ -2547,7 +2686,7 @@ func defaultPermutationAxes(model capabilities.Model) []combinations.Axis {
 		if _, ok := seen[opt.ID]; ok {
 			continue
 		}
-		vals := optionValues(opt)
+		vals := checkboxOptionValues(opt)
 		if len(vals) > 1 && len(vals) <= 12 && isLikelyJobAttribute(opt) {
 			axes = append(axes, combinations.Axis{Name: opt.ID, Values: vals})
 		}
@@ -2644,8 +2783,22 @@ func selectedValues(m map[string]*widget.Bool) []string {
 	}
 	return vals
 }
-func combinationToAttributes(c combinations.Combination) map[string]string {
-	return cloneStringMap(c)
+func combinationForConstraintValidation(combination combinations.Combination) map[string]string {
+	if !strings.HasPrefix(combination[pageRangeOptionID], pageRangeInternalPrefix) {
+		return combination
+	}
+	normalized := cloneStringMap(combination)
+	normalized[pageRangeOptionID] = pageRangeCustomServerValue
+	return normalized
+}
+
+func combinationToAttributes(combination combinations.Combination) map[string]string {
+	attributes := cloneStringMap(combination)
+	if custom, ok := attributes[pageRangeOptionID]; ok && strings.HasPrefix(custom, pageRangeInternalPrefix) {
+		attributes[pageRangeOptionID] = pageRangeCustomServerValue
+		attributes[pageRangeDataID] = strings.TrimPrefix(custom, pageRangeInternalPrefix)
+	}
+	return attributes
 }
 
 func cloneStringMap[M ~map[string]string](source M) map[string]string {
@@ -2664,8 +2817,12 @@ func selectedReadbackValues(got, selected map[string]string) map[string]string {
 		return nil
 	}
 	values := make(map[string]string, len(selected))
-	for key := range selected {
-		values[key] = got[key]
+	for key, selectedValue := range selected {
+		value := got[key]
+		if strings.EqualFold(key, pageRangeOptionID) && strings.EqualFold(selectedValue, pageRangeCustomServerValue) && strings.TrimSpace(value) == "" && strings.TrimSpace(got[pageRangeDataID]) != "" {
+			value = pageRangeCustomServerValue
+		}
+		values[key] = value
 	}
 	return values
 }
@@ -2696,6 +2853,22 @@ func optionValues(opt capabilities.Option) []string {
 		return []string{opt.Value}
 	}
 	return nil
+}
+
+func checkboxOptionValues(opt capabilities.Option) []string {
+	values := optionValues(opt)
+	if !isPageRangeOption(opt.ID) {
+		return values
+	}
+	// Range1 is Fiery's placeholder for a custom range text value, not a
+	// standalone checkbox choice. The dedicated editor supplies its contents.
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		if !strings.EqualFold(strings.TrimSpace(value), pageRangeCustomServerValue) {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered
 }
 
 func (w *Window) finishRun(status string) error {

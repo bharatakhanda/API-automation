@@ -9,6 +9,7 @@ import (
 
 	"api-automation/internal/combinations"
 	"api-automation/internal/copyvalues"
+	"api-automation/internal/pagevalues"
 	"api-automation/internal/presets"
 	"api-automation/internal/rangevalues"
 )
@@ -42,8 +43,19 @@ func (w *Window) saveCurrentPreset() {
 			continue
 		}
 		if chosen := selectedValues(values); len(chosen) > 0 {
-			sort.Strings(chosen)
-			selected[optionID] = chosen
+			if isPageRangeOption(optionID) {
+				filtered := chosen[:0]
+				for _, value := range chosen {
+					if !strings.EqualFold(strings.TrimSpace(value), pageRangeCustomServerValue) {
+						filtered = append(filtered, value)
+					}
+				}
+				chosen = filtered
+			}
+			if len(chosen) > 0 {
+				sort.Strings(chosen)
+				selected[optionID] = chosen
+			}
 		}
 	}
 	numeric := make(map[string]string)
@@ -53,6 +65,11 @@ func (w *Window) saveCurrentPreset() {
 	for optionID, input := range w.numericInputs {
 		if value := strings.TrimSpace(input.Text()); value != "" {
 			numeric[optionID] = value
+		}
+	}
+	if value := strings.TrimSpace(w.pageRangeInput.Text()); value != "" {
+		if _, exists := model.OptionByID(pageRangeOptionID); exists {
+			numeric[pageRangeDataID] = value
 		}
 	}
 	preset := presets.Preset{
@@ -92,9 +109,13 @@ func (w *Window) loadNamedPreset() {
 			missing += len(values)
 			continue
 		}
-		available := optionValues(option)
+		available := checkboxOptionValues(option)
 		ensureBools(w.selected, optionID, available)
 		for _, value := range values {
+			if isPageRangeOption(optionID) && strings.EqualFold(strings.TrimSpace(value), pageRangeCustomServerValue) {
+				missing++
+				continue
+			}
 			if !containsStringFold(available, value) {
 				missing++
 				continue
@@ -108,6 +129,18 @@ func (w *Window) loadNamedPreset() {
 		}
 	}
 	for optionID, value := range preset.NumericInputs {
+		if strings.EqualFold(optionID, pageRangeDataID) {
+			if _, exists := model.OptionByID(pageRangeOptionID); !exists {
+				missing++
+				continue
+			}
+			if _, err := pagevalues.Parse(value, pagevalues.DefaultExpansionLimit); err != nil {
+				missing++
+				continue
+			}
+			w.pageRangeInput.SetText(value)
+			continue
+		}
 		if isCopiesOption(optionID) {
 			if _, err := copyvalues.Parse(value); err != nil {
 				missing++
