@@ -149,6 +149,54 @@ func TestHeaderSnapshotRedactsCredentialHeaders(t *testing.T) {
 	}
 }
 
+func TestCheckJobConstraintsParsesConflictsAndSolutions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/live/api/v5/jobs/JOB-1/constraint" || r.Method != http.MethodPost {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"conflict":{"EFResolution":"360x720dpi"},"solutions":["360x360dpi"]}}`))
+	}))
+	defer server.Close()
+	client, err := New(Config{ServerIP: server.URL, SecretKey: "secret", Password: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check, err := client.CheckJobConstraints(context.Background(), Session{Cookie: "session=abc"}, "JOB-1", map[string]string{"EFResolution": "360x720dpi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !check.Supported || check.Conflicts["EFResolution"] != "360x720dpi" || len(check.Solutions) != 1 {
+		t.Fatalf("check = %#v", check)
+	}
+}
+
+func TestCheckJobConstraintsAllowsAndCachesUnsupportedEndpoint(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		http.Error(w, "not supported", http.StatusNotFound)
+	}))
+	defer server.Close()
+	client, err := New(Config{ServerIP: server.URL, SecretKey: "secret", Password: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check, err := client.CheckJobConstraints(context.Background(), Session{}, "JOB-1", map[string]string{"EFResolution": "360x720dpi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if check.Supported || check.Warning == "" {
+		t.Fatalf("check = %#v", check)
+	}
+	if _, err := client.CheckJobConstraints(context.Background(), Session{}, "JOB-2", map[string]string{"EFResolution": "360x720dpi"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 { // one POST plus one PUT probe; the second check is cached
+		t.Fatalf("constraint endpoint calls = %d, want 2", calls)
+	}
+}
+
 func TestLoginPayloadUsesVersionSpecificAPIKeyField(t *testing.T) {
 	client := &Client{cfg: Config{Username: "admin", Password: "password", SecretKey: "secret"}}
 	v5 := client.loginPayload(apiV5)

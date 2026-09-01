@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -42,9 +44,11 @@ type Config struct {
 
 // Client is a small, concurrency-safe Fiery API client.
 type Client struct {
-	baseURL string
-	cfg     Config
-	http    *http.Client
+	baseURL          string
+	cfg              Config
+	http             *http.Client
+	constraintProbe  sync.Mutex
+	constraintStatus atomic.Int32 // -1 unsupported, 0 unknown, 1 supported
 }
 
 // Session contains the authenticated cookie required by Fiery API endpoints.
@@ -64,6 +68,15 @@ type ImportResult struct {
 
 // JobRawResponse captures the exact response from a single Fiery job GET so it
 // can be compared directly with the same request in tools such as Postman.
+type ConstraintCheck struct {
+	Supported bool              `json:"supported"`
+	Conflicts map[string]string `json:"conflicts,omitempty"`
+	Solutions []string          `json:"solutions,omitempty"`
+	Warning   string            `json:"warning,omitempty"`
+}
+
+func (c ConstraintCheck) HasConflicts() bool { return len(c.Conflicts) > 0 }
+
 type JobRawResponse struct {
 	Variant         string            `json:"Variant,omitempty"`
 	Method          string            `json:"Method"`
@@ -469,6 +482,163 @@ func (c *Client) getJobAttributesAt(ctx context.Context, session Session, apiPat
 		return nil, fmt.Errorf("job response from %s/jobs/%s%s did not contain readable attributes; body=%s", apiPath, jobID, suffix, truncateForError(body, 2048))
 	}
 	return attrs, nil
+}
+
+// CheckJobConstraints asks Fiery to validate selected settings against the
+// imported job's current ticket. The endpoint is optional on older servers;
+// unsupported responses are returned as Supported=false so the proven update
+// operation remains the final server-side authority.
+func (c *Client) CheckJobConstraints(ctx context.Context, session Session, jobID string, attributes map[string]string) (ConstraintCheck, error) {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return ConstraintCheck{}, errors.New("job ID is required")
+	}
+	if len(attributes) == 0 {
+		return ConstraintCheck{Supported: true}, nil
+	}
+	checkContext, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	ctx = checkContext
+	if c.constraintStatus.Load() < 0 {
+		return ConstraintCheck{Supported: false, Warning: "Fiery job constraint endpoint is unavailable (cached)"}, nil
+	}
+	if c.constraintStatus.Load() == 0 {
+		c.constraintProbe.Lock()
+		state := c.constraintStatus.Load()
+		if state < 0 {
+			c.constraintProbe.Unlock()
+			return ConstraintCheck{Supported: false, Warning: "Fiery job constraint endpoint is unavailable (cached)"}, nil
+		}
+		if state > 0 {
+			// Another goroutine completed the one-time probe while this caller
+			// waited. Release the probe lock before the job-specific request so
+			// supported checks remain concurrent.
+			c.constraintProbe.Unlock()
+			return c.checkJobConstraints(ctx, session, jobID, attributes)
+		}
+		check, err := c.checkJobConstraints(ctx, session, jobID, attributes)
+		if err == nil {
+			if check.Supported {
+				c.constraintStatus.Store(1)
+			} else if definitelyUnsupportedConstraintEndpoint(check.Warning) {
+				c.constraintStatus.Store(-1)
+			}
+		}
+		c.constraintProbe.Unlock()
+		return check, err
+	}
+	return c.checkJobConstraints(ctx, session, jobID, attributes)
+}
+
+func (c *Client) checkJobConstraints(ctx context.Context, session Session, jobID string, attributes map[string]string) (ConstraintCheck, error) {
+	payload, err := json.Marshal(map[string]map[string]string{"attributes": attributes})
+	if err != nil {
+		return ConstraintCheck{}, err
+	}
+	var failures []string
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		endpoint := c.baseURL + apiV5 + "/jobs/" + url.PathEscape(jobID) + "/constraint"
+		req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(payload))
+		if err != nil {
+			return ConstraintCheck{}, err
+		}
+		req.Header.Set("Cookie", session.Cookie)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+		resp, err := c.http.Do(req)
+		if err != nil {
+			failures = append(failures, method+": "+err.Error())
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return ConstraintCheck{}, fmt.Errorf("read job constraint response: %w", readErr)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			conflicts, solutions := extractConstraintCheck(body)
+			if len(conflicts) > 0 {
+				return ConstraintCheck{Supported: true, Conflicts: conflicts, Solutions: solutions}, nil
+			}
+			failures = append(failures, fmt.Sprintf("%s HTTP %d: %s", method, resp.StatusCode, truncateForError(body, 1024)))
+			continue
+		}
+		check := ConstraintCheck{Supported: true}
+		check.Conflicts, check.Solutions = extractConstraintCheck(body)
+		return check, nil
+	}
+	return ConstraintCheck{Supported: false, Warning: strings.Join(failures, " | ")}, nil
+}
+
+func definitelyUnsupportedConstraintEndpoint(warning string) bool {
+	warning = strings.ToUpper(warning)
+	if strings.Contains(warning, "HTTP 500") || strings.Contains(warning, "HTTP 502") || strings.Contains(warning, "HTTP 503") || strings.Contains(warning, "HTTP 504") {
+		return false
+	}
+	return strings.Contains(warning, "HTTP 400") || strings.Contains(warning, "HTTP 404") || strings.Contains(warning, "HTTP 405") || strings.Contains(warning, "HTTP 501")
+}
+
+func extractConstraintCheck(body []byte) (map[string]string, []string) {
+	var payload any
+	if json.Unmarshal(body, &payload) != nil {
+		return nil, nil
+	}
+	conflicts := make(map[string]string)
+	var solutions []string
+	var walk func(any)
+	walk = func(value any) {
+		switch typed := value.(type) {
+		case map[string]any:
+			for key, nested := range typed {
+				switch {
+				case strings.EqualFold(key, "conflict") || strings.EqualFold(key, "conflicts"):
+					if values, ok := nested.(map[string]any); ok {
+						for conflictKey, conflictValue := range values {
+							conflicts[conflictKey] = cleanScalar(conflictValue)
+						}
+					}
+				case strings.EqualFold(key, "solutions"):
+					if values, ok := nested.([]any); ok {
+						for _, solution := range values {
+							if text := cleanScalar(solution); text != "" {
+								solutions = append(solutions, text)
+							}
+						}
+					}
+				default:
+					walk(nested)
+				}
+			}
+		case []any:
+			for _, nested := range typed {
+				walk(nested)
+			}
+		}
+	}
+	walk(payload)
+	if len(conflicts) == 0 {
+		conflicts = nil
+	}
+	return conflicts, solutions
+}
+
+func cleanScalar(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := cleanScalar(item); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, ", ")
+	default:
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
 }
 
 func (c *Client) UpdateJobAttributes(ctx context.Context, session Session, jobID string, attributes map[string]string) error {
