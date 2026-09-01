@@ -97,6 +97,44 @@ func TestGroupedOptionsDoesNotDisplayOneAPIOptionTwice(t *testing.T) {
 	}
 }
 
+func TestParsePropertyMetadataRangeAndConstraints(t *testing.T) {
+	options := parseProperties(raw(`{"data":{"items":[{"id":"EFMediaThickness","group":"fppapersource","ppdtype":"efirange","value":2,"value_attributes":{"editable":true,"increment":1,"min":1,"max":50,"precision":0},"constraints":{}},{"id":"EFResolution","group":"fpimage","ppdtype":"uimenu","value":"360x360dpi","values":["360x360dpi","360x720dpi"],"constraints":{"360x720dpi":{"EFEdgeDropSize":["0_1_2_2_2"]}}}]}}`))
+	if len(options) != 2 {
+		t.Fatalf("options = %#v", options)
+	}
+	rangeOption := options[0]
+	if rangeOption.ID != "EFMediaThickness" || rangeOption.Group != "fppapersource" || rangeOption.Range == nil || rangeOption.Range.Min != 1 || rangeOption.Range.Max != 50 {
+		t.Fatalf("range option = %#v", rangeOption)
+	}
+	resolution := options[1]
+	if got := resolution.Constraints["360x720dpi"]["EFEdgeDropSize"]; len(got) != 1 || got[0] != "0_1_2_2_2" {
+		t.Fatalf("constraints = %#v", resolution.Constraints)
+	}
+}
+
+func TestCategorySearchAndExplicitConstraintValidation(t *testing.T) {
+	model := Model{Options: []Option{
+		{ID: "EFResolution", Label: "Resolution", Group: "fpimage", Values: []string{"360x360dpi", "360x720dpi"}, Constraints: Constraints{"360x720dpi": {"EFEdgeDropSize": {"0_1_2_2_2"}}}},
+		{ID: "EFEdgeDropSize", Label: "Edge enhancement", Group: "fpimage", Values: []string{"None", "0_1_2_2_2"}},
+		{ID: "EFMediaThickness", Label: "Media thickness", Group: "fppapersource", Range: &NumericRange{Min: 1, Max: 50, Increment: 1}},
+	}}
+	groups := FilteredGroups(model, "thickness")
+	if len(groups) != 1 || groups[0].Name != "Substrate" || len(groups[0].Options) != 1 {
+		t.Fatalf("filtered groups = %#v", groups)
+	}
+	valid := map[string]string{"EFResolution": "360x720dpi", "EFEdgeDropSize": "0_1_2_2_2"}
+	if conflicts := ValidateCombination(model, valid); len(conflicts) != 0 {
+		t.Fatalf("valid conflicts = %#v", conflicts)
+	}
+	invalid := map[string]string{"EFResolution": "360x720dpi", "EFEdgeDropSize": "None"}
+	if conflicts := ValidateCombination(model, invalid); len(conflicts) != 1 {
+		t.Fatalf("invalid conflicts = %#v", conflicts)
+	}
+	if !NeedsConstraintCheck(model, map[string]string{"EFResolution": "360x720dpi"}) || NeedsConstraintCheck(model, map[string]string{"Unrelated": "x"}) {
+		t.Fatal("constraint-check requirement detection is incorrect")
+	}
+}
+
 func TestGroupedOptionsDoesNotDisplayCopiesAliasesTwice(t *testing.T) {
 	model := Model{Options: []Option{
 		{ID: "EFCopies", Values: []string{"1"}},
