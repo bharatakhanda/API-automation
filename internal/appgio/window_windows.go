@@ -5,10 +5,12 @@ package appgio
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
-	"net/http"
+	"math"
+	mathrand "math/rand/v2"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -21,10 +23,12 @@ import (
 
 	"api-automation/internal/capabilities"
 	"api-automation/internal/combinations"
+	"api-automation/internal/copyvalues"
 	"api-automation/internal/fiery"
 	"api-automation/internal/files"
 	"api-automation/internal/model"
 	"api-automation/internal/preflight"
+	"api-automation/internal/reportxlsx"
 
 	"gioui.org/app"
 	"gioui.org/layout"
@@ -36,6 +40,24 @@ import (
 	"gioui.org/widget/material"
 	"github.com/rodrigocfd/windigo/co"
 	"github.com/rodrigocfd/windigo/win"
+)
+
+const (
+	defaultCaseLimit       = 100
+	maxCaseLimit           = 10_000
+	maxWorkerCount         = 1000
+	maxDisplayedResults    = 250
+	maxDisplayedLogLines   = 500
+	maxRetainedResults     = 2_000
+	maxRetainedLogLines    = 2_000
+	retainedEntryTrimBatch = 256
+)
+
+const (
+	pageSettings = iota
+	pageCapabilities
+	pageResults
+	pageLogs
 )
 
 var palette = struct {
@@ -62,39 +84,65 @@ type Window struct {
 
 	serverIP, secretKey, password widget.Editor
 	folderPath, filePath          widget.Editor
-	endpoint, workers, maxCases   widget.Editor
+	workers, maxCases             widget.Editor
+	copiesInput, jobActionID      widget.Editor
 
-	settingsButton, captureButton, runButton, cancelButton widget.Clickable
-	testServerButton, apiTraceButton                       widget.Clickable
-	browseFolderButton, browseFileButton                   widget.Clickable
-	navButtons                                             []widget.Clickable
-	allFilesButton, singleFileButton, randomFileButton     widget.Clickable
-	selectedOnlyButton, allPermButton, pairwiseButton      widget.Clickable
-	modeButtons                                            []widget.Clickable
-	modeChecks                                             []widget.Bool
-	fileModeGroup, runModeGroup                            widget.Enum
+	captureButton, runButton, cancelButton, resetButton widget.Clickable
+	testServerButton, apiTraceButton, exportButton      widget.Clickable
+	cancelJobButton, deleteJobButton                    widget.Clickable
+	browseFolderButton, browseFileButton                widget.Clickable
+	navButtons                                          []widget.Clickable
+	selectedOnlyButton, allPermButton, pairwiseButton   widget.Clickable
+	modeChecks                                          []widget.Bool
+	fileModeGroup                                       widget.Enum
 
-	activePage    int
-	selectionMode int
-	strategy      combinations.Strategy
-	runModeIndex  int
+	activePage int
+	strategy   combinations.Strategy
 
 	capabilities     capabilities.Model
 	selected         map[string]map[string]*widget.Bool
+	groupChecks      map[string]*widget.Bool
+	optionChecks     map[string]*widget.Bool
 	mu               sync.Mutex
+	backgroundMu     sync.Mutex
+	backgroundWG     sync.WaitGroup
+	appContext       context.Context
+	appCancel        context.CancelFunc
+	closing          atomic.Bool
 	log              []string
+	logCount         int
 	results          []resultRow
+	resultCount      int
 	status           string
 	serverTestStatus string
 	captureActive    bool
 	captureProgress  float32
 	capturePhase     string
 	running          atomic.Bool
+	testingServer    atomic.Bool
+	exportingResults atomic.Bool
+	managingJob      atomic.Bool
 	cancel           context.CancelFunc
 	diagnostic       *diagnosticLog
+	resultStore      *reportxlsx.ResultStore
+	resultStoreError string
+	lastRun          reportxlsx.Summary
 }
 
-type resultRow struct{ File, Method, Status, Duration, Detail string }
+type resultRow struct{ JobID, JobName, Result, Duration, Detail string }
+
+type workspacePage struct {
+	NavigationLabel string
+	Title           string
+	Subtitle        string
+}
+
+var workspacePages = []workspacePage{
+	{NavigationLabel: "Settings", Title: "Settings", Subtitle: "Configure server connection, test files, and Fiery run mode."},
+	{NavigationLabel: "Capabilities", Title: "Capabilities", Subtitle: "Discover Fiery capabilities and choose job options for automation."},
+	{NavigationLabel: "Results", Title: "Results", Subtitle: "Review automation outcomes, verification status, and execution details."},
+	{NavigationLabel: "Activity logs", Title: "Activity logs", Subtitle: "Review live operational messages and diagnostic-log location."},
+}
 
 type apiTraceStage struct {
 	Name      string                 `json:"name"`
@@ -110,6 +158,7 @@ type apiTraceReport struct {
 	JobID          string             `json:"jobId,omitempty"`
 	Attributes     map[string]string  `json:"attributes"`
 	UpdateProtocol string             `json:"updateProtocol"`
+	SessionLogin   string             `json:"sessionLogin,omitempty"`
 	Import         fiery.ImportResult `json:"import"`
 	Stages         []apiTraceStage    `json:"stages"`
 	Final          map[string]string  `json:"finalAttributes,omitempty"`
@@ -129,10 +178,15 @@ var runModes = []runMode{
 	{Label: "Press Print", ImportQueue: "hold", Actions: []string{"rip", "production", "press_print"}},
 	{Label: "Ready to Print", ImportQueue: "hold", Actions: []string{"rip", "production"}},
 	{Label: "Print", ImportQueue: "hold", Actions: []string{"rip", "production", "press_print", "print"}},
+	{Label: "Cancel while Processing/Ripping", ImportQueue: "hold", Actions: []string{"cancel_ripping"}},
+	{Label: "Cancel while Waiting to Print", ImportQueue: "hold", Actions: []string{"rip", "production", "cancel_waiting"}},
+	{Label: "Cancel while Printing", ImportQueue: "hold", Actions: []string{"rip", "production", "press_print", "cancel_printing"}},
+	{Label: "Delete", ImportQueue: "hold", Actions: []string{"delete"}},
 }
 
 func New() *Window {
-	w := &Window{window: new(app.Window), theme: material.NewTheme(), selected: map[string]map[string]*widget.Bool{}, strategy: combinations.StrategySelected, status: "Ready · Open Settings, discover capabilities, then run automation.", diagnostic: newDiagnosticLog()}
+	appContext, appCancel := context.WithCancel(context.Background())
+	w := &Window{window: new(app.Window), theme: material.NewTheme(), selected: map[string]map[string]*widget.Bool{}, groupChecks: map[string]*widget.Bool{}, optionChecks: map[string]*widget.Bool{}, strategy: combinations.StrategySelected, status: "Ready · Open Settings, discover capabilities, then run automation.", diagnostic: newDiagnosticLog(), appContext: appContext, appCancel: appCancel}
 	w.theme.Palette = material.Palette{Bg: palette.bg, Fg: palette.text, ContrastBg: palette.primary, ContrastFg: rgb(0xffffff)}
 	w.theme.TextSize = 15
 	w.list.Axis = layout.Vertical
@@ -143,11 +197,11 @@ func New() *Window {
 	w.password.Mask = '•'
 	initEditor(&w.folderPath, "")
 	initEditor(&w.filePath, "")
-	initEditor(&w.endpoint, "/live/api/v5/jobs")
 	initEditor(&w.workers, "1")
 	initEditor(&w.maxCases, "100")
+	initEditor(&w.copiesInput, "1")
+	initEditor(&w.jobActionID, "")
 	w.fileModeGroup.Value = "all"
-	w.runModeGroup.Value = "0"
 	w.modeChecks = make([]widget.Bool, len(runModes))
 	if len(w.modeChecks) > 0 {
 		w.modeChecks[0].Value = true
@@ -160,37 +214,42 @@ func New() *Window {
 func initEditor(e *widget.Editor, text string) { e.SingleLine = true; e.Submit = true; e.SetText(text) }
 
 func Run() int {
-	code := make(chan int, 1)
+	// Gio's Windows app.Main blocks forever by design. The window goroutine
+	// must terminate the process after its event loop and cleanup complete;
+	// waiting for app.Main to return leaves a headless process alive whenever
+	// other runtime goroutines prevent Go's deadlock detector from firing.
 	go func() {
-		_, _ = win.CoInitializeEx(co.COINIT_APARTMENTTHREADED | co.COINIT_DISABLE_OLE1DDE)
-		defer win.CoUninitialize()
-		defer func() {
-			if r := recover(); r != nil {
-				_ = writeCrashReport(fmt.Sprintf("panic: %v", r), debug.Stack())
-				code <- 1
-			}
-		}()
-		if err := New().Run(); err != nil {
-			_ = writeCrashReport(err.Error(), nil)
-			code <- 1
-			return
-		}
-		code <- 0
+		os.Exit(runWindow())
 	}()
 	app.Main()
-	return <-code
+	return 0 // Unreachable on Windows.
+}
+
+func runWindow() (code int) {
+	_, _ = win.CoInitializeEx(co.COINIT_APARTMENTTHREADED | co.COINIT_DISABLE_OLE1DDE)
+	defer win.CoUninitialize()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			_ = writeCrashReport(fmt.Sprintf("panic: %v", recovered), debug.Stack())
+			code = 1
+		}
+	}()
+	if err := New().Run(); err != nil {
+		_ = writeCrashReport(err.Error(), nil)
+		return 1
+	}
+	return 0
 }
 
 func (w *Window) Run() error {
 	defer w.diagnostic.close()
+	defer w.closeResultStore()
 	w.diagnostic.printf("Application started. Diagnostic log: %s", w.diagnostic.path)
 	for {
 		e := w.window.Event()
 		switch e := e.(type) {
 		case app.DestroyEvent:
-			if w.cancel != nil {
-				w.cancel()
-			}
+			w.shutdownBackground(5 * time.Second)
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&w.ops, e)
@@ -201,7 +260,83 @@ func (w *Window) Run() error {
 	}
 }
 
+func (w *Window) launchBackground(operation string, work func()) {
+	w.backgroundMu.Lock()
+	if w.closing.Load() {
+		w.backgroundMu.Unlock()
+		return
+	}
+	w.backgroundWG.Add(1)
+	w.backgroundMu.Unlock()
+	go func() {
+		defer w.backgroundWG.Done()
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				stack := debug.Stack()
+				_ = writeCrashReport(fmt.Sprintf("panic in %s: %v", operation, recovered), stack)
+				w.diagnostic.printf("PANIC: operation=%s value=%v stack=%s", operation, recovered, stack)
+				w.setStatus(operation + " failed unexpectedly. See logs/crash.log.")
+			}
+		}()
+		work()
+	}()
+}
+
+func (w *Window) shutdownBackground(timeout time.Duration) bool {
+	w.backgroundMu.Lock()
+	w.closing.Store(true)
+	if w.appCancel != nil {
+		w.appCancel()
+	}
+	if w.cancel != nil {
+		w.cancel()
+	}
+	w.backgroundMu.Unlock()
+
+	stopped := make(chan struct{})
+	go func() {
+		w.backgroundWG.Wait()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		w.diagnostic.printf("SHUTDOWN: all background operations stopped")
+		return true
+	case <-time.After(timeout):
+		// Returning from the window loop is more important than waiting for a
+		// slow server socket. Every Fiery request is context-bound and also has
+		// a client timeout, so remaining goroutines cannot own the GUI lifetime.
+		w.diagnostic.printf("SHUTDOWN: timed out after %s waiting for background operations; continuing process exit", timeout)
+		return false
+	}
+}
+
+func (w *Window) rootContext() context.Context {
+	if w.appContext != nil {
+		return w.appContext
+	}
+	return context.Background()
+}
+
+func (w *Window) invalidate() {
+	if !w.closing.Load() && w.window != nil {
+		w.window.Invalidate()
+	}
+}
+
 func (w *Window) handleClicks(gtx layout.Context) {
+	for w.resetButton.Clicked(gtx) {
+		w.resetSelections()
+	}
+	for w.cancelJobButton.Clicked(gtx) {
+		w.startManualJobAction("cancel")
+	}
+	for w.deleteJobButton.Clicked(gtx) {
+		w.startManualJobAction("delete")
+	}
+	for w.exportButton.Clicked(gtx) {
+		w.startExcelExport()
+	}
 	for w.apiTraceButton.Clicked(gtx) {
 		w.startAPITrace()
 	}
@@ -209,11 +344,11 @@ func (w *Window) handleClicks(gtx layout.Context) {
 		w.testServerConnection()
 	}
 	for w.captureButton.Clicked(gtx) {
-		w.activePage = 1
+		w.setActivePage(pageCapabilities)
 		w.captureCapabilities()
 	}
 	for w.runButton.Clicked(gtx) {
-		w.activePage = 2
+		w.setActivePage(pageResults)
 		w.startRun()
 	}
 	for w.browseFolderButton.Clicked(gtx) {
@@ -229,14 +364,13 @@ func (w *Window) handleClicks(gtx layout.Context) {
 			w.setStatus("File selection failed: " + err.Error())
 		} else if path != "" {
 			w.filePath.SetText(path)
-			w.selectionMode = 1
 			w.fileModeGroup.Value = "single"
 			w.addLog("Selected test file: %s", path)
 		}
 	}
 	for i := range w.navButtons {
 		for w.navButtons[i].Clicked(gtx) {
-			w.activePage = i
+			w.setActivePage(i)
 		}
 	}
 	for w.cancelButton.Clicked(gtx) {
@@ -244,15 +378,6 @@ func (w *Window) handleClicks(gtx layout.Context) {
 			w.cancel()
 			w.addLog("Cancellation requested")
 		}
-	}
-	for w.allFilesButton.Clicked(gtx) {
-		w.selectionMode = 0
-	}
-	for w.singleFileButton.Clicked(gtx) {
-		w.selectionMode = 1
-	}
-	for w.randomFileButton.Clicked(gtx) {
-		w.selectionMode = 2
 	}
 	for w.selectedOnlyButton.Clicked(gtx) {
 		w.strategy = combinations.StrategySelected
@@ -265,13 +390,56 @@ func (w *Window) handleClicks(gtx layout.Context) {
 	}
 }
 
+func (w *Window) resetSelections() {
+	if w.running.Load() {
+		w.setStatus("Wait for the active operation to finish before resetting selections.")
+		return
+	}
+	for _, values := range w.selected {
+		for _, selected := range values {
+			selected.Value = false
+		}
+	}
+	for _, selected := range w.groupChecks {
+		selected.Value = false
+	}
+	for _, selected := range w.optionChecks {
+		selected.Value = false
+	}
+	w.strategy = combinations.StrategySelected
+	w.copiesInput.SetText("1")
+	w.workers.SetText("1")
+	w.maxCases.SetText(strconv.Itoa(defaultCaseLimit))
+	w.fileModeGroup.Value = "all"
+	for index := range w.modeChecks {
+		w.modeChecks[index].Value = index == 0
+	}
+	w.jobActionID.SetText("")
+	w.setStatus("Selections reset to defaults. Server details, discovered capabilities, and file paths were preserved.")
+	w.addLog("Reset capability selections, Copies, strategy, run modes, parallel jobs, and case limit to defaults")
+}
+
+func (w *Window) setActivePage(page int) {
+	if page < 0 || page >= len(workspacePages) || page == w.activePage {
+		return
+	}
+	w.activePage = page
+	w.list.Position = layout.Position{}
+}
+
 func (w *Window) layout(gtx layout.Context) layout.Dimensions {
 	paint.Fill(gtx.Ops, palette.bg)
 	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.sidebar(gtx) }),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(24), Right: unit.Dp(28), Bottom: unit.Dp(20), Left: unit.Dp(28)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return w.list.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions { return w.content(gtx) })
+			return layout.Inset{Top: unit.Dp(24), Right: unit.Dp(20), Bottom: unit.Dp(20), Left: unit.Dp(28)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				listStyle := material.List(w.theme, &w.list)
+				listStyle.ScrollbarStyle.Track.Color = withAlpha(palette.primaryDim, 160)
+				listStyle.ScrollbarStyle.Indicator.Color = withAlpha(palette.primary, 190)
+				listStyle.ScrollbarStyle.Indicator.HoverColor = palette.primary
+				listStyle.ScrollbarStyle.Indicator.MinorWidth = unit.Dp(8)
+				listStyle.ScrollbarStyle.Indicator.CornerRadius = unit.Dp(4)
+				return listStyle.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions { return w.content(gtx) })
 			})
 		}),
 	)
@@ -281,50 +449,49 @@ func (w *Window) sidebar(gtx layout.Context) layout.Dimensions {
 	gtx.Constraints.Min.X, gtx.Constraints.Max.X = gtx.Dp(unit.Dp(210)), gtx.Dp(unit.Dp(210))
 	paint.FillShape(gtx.Ops, palette.navy, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	return layout.Inset{Top: unit.Dp(24), Left: unit.Dp(18), Right: unit.Dp(18)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		if len(w.navButtons) != 3 {
-			w.navButtons = make([]widget.Clickable, 3)
+		if len(w.navButtons) != len(workspacePages) {
+			w.navButtons = make([]widget.Clickable, len(workspacePages))
 		}
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		children := []layout.FlexChild{
 			layout.Rigid(label(w.theme, "API Automation", 20, rgb(0xffffff)).Layout),
 			layout.Rigid(spacer(26)),
 			layout.Rigid(label(w.theme, "Workspace", 13, rgb(0x93a4bd)).Layout),
 			layout.Rigid(spacer(14)),
-			layout.Rigid(navButton(w.theme, &w.navButtons[0], "Settings", w.activePage == 0)),
-			layout.Rigid(navButton(w.theme, &w.navButtons[1], "Capabilities", w.activePage == 1)),
-			layout.Rigid(navButton(w.theme, &w.navButtons[2], "Results & logs", w.activePage == 2)),
-		)
+		}
+		for pageIndex, page := range workspacePages {
+			children = append(children, layout.Rigid(navButton(w.theme, &w.navButtons[pageIndex], page.NavigationLabel, w.activePage == pageIndex)))
+		}
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 	})
 }
 
 func (w *Window) content(gtx layout.Context) layout.Dimensions {
 	children := []layout.FlexChild{layout.Rigid(w.header), layout.Rigid(spacer(18))}
 	switch w.activePage {
-	case 0:
-		children = append(children, layout.Rigid(w.settingsCard))
-	case 1:
+	case pageCapabilities:
 		children = append(children, layout.Rigid(w.capabilitiesCard))
-	default:
+	case pageResults:
 		children = append(children, layout.Rigid(w.resultsCard))
+	case pageLogs:
+		children = append(children, layout.Rigid(w.logsCard))
+	default:
+		children = append(children, layout.Rigid(w.settingsCard))
 	}
 	children = append(children, layout.Rigid(spacer(20)))
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
 func (w *Window) header(gtx layout.Context) layout.Dimensions {
-	title := "Settings"
-	subtitle := "Configure server connection, test files, and Fiery run mode."
-	if w.activePage == 1 {
-		title = "Capabilities"
-		subtitle = "Discover Fiery capabilities and choose job options for automation."
-	} else if w.activePage == 2 {
-		title = "Results & logs"
-		subtitle = "Review automation outcomes, diagnostics, and runtime messages."
+	pageIndex := w.activePage
+	if pageIndex < 0 || pageIndex >= len(workspacePages) {
+		pageIndex = pageSettings
 	}
+	page := workspacePages[pageIndex]
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(label(w.theme, title, 24, palette.text).Layout), layout.Rigid(label(w.theme, subtitle, 14, palette.muted).Layout))
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(label(w.theme, page.Title, 24, palette.text).Layout), layout.Rigid(label(w.theme, page.Subtitle, 14, palette.muted).Layout))
 		}),
-		layout.Rigid(primaryButton(w.theme, &w.captureButton, "Get server capabilities")), layout.Rigid(spacerX(10)), layout.Rigid(primaryButton(w.theme, &w.runButton, "Run automation")), layout.Rigid(spacerX(10)), layout.Rigid(secondaryButton(w.theme, &w.cancelButton, "Cancel")),
+		layout.Rigid(secondaryButton(w.theme, &w.resetButton, "Reset")), layout.Rigid(spacerX(10)), layout.Rigid(primaryButton(w.theme, &w.captureButton, "Get server capabilities")), layout.Rigid(spacerX(10)), layout.Rigid(primaryButton(w.theme, &w.runButton, "Run automation")), layout.Rigid(spacerX(10)), layout.Rigid(secondaryButton(w.theme, &w.cancelButton, "Cancel")),
 	)
 }
 
@@ -374,7 +541,7 @@ func (w *Window) settingsCard(gtx layout.Context) layout.Dimensions {
 						}),
 						layout.Rigid(spacer(18)),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return row(gtx, fieldBox(w.theme, "Parallel jobs", "1", &w.workers, 150))
+							return row(gtx, fieldBox(w.theme, "Parallel jobs (1-1000)", "1", &w.workers, 180))
 						}),
 						layout.Rigid(spacer(22)),
 						layout.Rigid(w.fileSelectionRadioGroup),
@@ -386,30 +553,6 @@ func (w *Window) settingsCard(gtx layout.Context) layout.Dimensions {
 		)
 	})
 }
-func (w *Window) assetsCard(gtx layout.Context) layout.Dimensions {
-	return card(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(sectionTitle(w.theme, "02 Test assets and run setup")),
-			layout.Rigid(spacer(12)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return row(gtx, field(w.theme, "Folder path", &w.folderPath, 610), secondaryButton(w.theme, &w.browseFolderButton, "Browse folder"), field(w.theme, "Workers", &w.workers, 90))
-			}),
-			layout.Rigid(spacer(12)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return row(gtx, field(w.theme, "Specific file", &w.filePath, 610), secondaryButton(w.theme, &w.browseFileButton, "Browse file"), field(w.theme, "Endpoint", &w.endpoint, 260))
-			}),
-			layout.Rigid(spacer(12)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return row(gtx, toggle(w.theme, &w.allFilesButton, "All files", w.selectionMode == 0), toggle(w.theme, &w.singleFileButton, "Single file", w.selectionMode == 1), toggle(w.theme, &w.randomFileButton, "Random file", w.selectionMode == 2))
-			}),
-			layout.Rigid(spacer(12)), layout.Rigid(w.modeSelector))
-	})
-}
-
-func (w *Window) modeSelector(gtx layout.Context) layout.Dimensions {
-	return w.runModeRadioGroup(gtx)
-}
-
 func (w *Window) fileSelectionRadioGroup(gtx layout.Context) layout.Dimensions {
 	return radioGroup(gtx, w.theme, "File selection", "Choose how files are picked for this run.", []radioOption{
 		{Key: "all", Label: "All files in folder"},
@@ -552,7 +695,9 @@ func (w *Window) queueGroup(model capabilities.Model) layout.Widget {
 }
 
 func (w *Window) capabilityGroup(gtx layout.Context, group capabilities.OptionGroup) layout.Dimensions {
-	children := []layout.FlexChild{layout.Rigid(label(w.theme, group.Name, 16, palette.text).Layout), layout.Rigid(spacer(8))}
+	children := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		return w.capabilityGroupHeader(gtx, group)
+	}), layout.Rigid(spacer(8))}
 	for _, opt := range group.Options {
 		option := opt
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionRow(gtx, option) }), layout.Rigid(spacer(8)))
@@ -562,40 +707,167 @@ func (w *Window) capabilityGroup(gtx layout.Context, group capabilities.OptionGr
 	})
 }
 
-func (w *Window) optionRow(gtx layout.Context, opt capabilities.Option) layout.Dimensions {
-	ensureBools(w.selected, opt.ID, optionValues(opt))
-	vals := optionValues(opt)
-	shown := vals
-	if len(shown) > 12 {
-		shown = shown[:12]
+func (w *Window) capabilityGroupHeader(gtx layout.Context, group capabilities.OptionGroup) layout.Dimensions {
+	if w.groupChecks == nil {
+		w.groupChecks = make(map[string]*widget.Bool)
 	}
-	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+	allSelected, selectableCount := w.groupSelectionState(group)
+	if selectableCount == 0 {
+		return label(w.theme, group.Name, 16, palette.text).Layout(gtx)
+	}
+	selector := w.headerCheckbox(w.groupChecks, group.Name)
+	selector.Value = allSelected
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+		layout.Flexed(1, label(w.theme, group.Name, 16, palette.text).Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Min.X, gtx.Constraints.Max.X = gtx.Dp(unit.Dp(220)), gtx.Dp(unit.Dp(220))
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(label(w.theme, opt.Label, 14, palette.text).Layout),
-				layout.Rigid(label(w.theme, opt.ID, 12, palette.muted).Layout),
-				layout.Rigid(label(w.theme, fmt.Sprintf("%d value(s)", len(vals)), 12, palette.muted).Layout),
-			)
-		}),
-		layout.Rigid(spacerX(12)),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			items := make([]layout.FlexChild, 0, len(shown)+1)
-			for _, v := range shown {
-				val := v
-				cb := w.selected[opt.ID][val]
-				items = append(items, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					c := material.CheckBox(w.theme, cb, val)
-					c.Color = palette.primary
-					return c.Layout(gtx)
-				}))
+			before := selector.Value
+			control := material.CheckBox(w.theme, selector, "Select all in group")
+			control.Color = palette.primary
+			dimensions := control.Layout(gtx)
+			if selector.Value != before {
+				w.setGroupSelection(group, selector.Value)
 			}
-			if len(vals) > len(shown) {
-				items = append(items, layout.Rigid(label(w.theme, fmt.Sprintf("+%d more values captured in snapshot/logs", len(vals)-len(shown)), 13, palette.muted).Layout))
-			}
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, items...)
+			return dimensions
 		}),
 	)
+}
+
+func (w *Window) groupSelectionState(group capabilities.OptionGroup) (bool, int) {
+	allSelected := true
+	selectableCount := 0
+	for _, option := range group.Options {
+		if isCopiesOption(option.ID) {
+			continue
+		}
+		values := optionValues(option)
+		ensureBools(w.selected, option.ID, values)
+		for _, value := range values {
+			selectableCount++
+			if !w.selected[option.ID][value].Value {
+				allSelected = false
+			}
+		}
+	}
+	return allSelected && selectableCount > 0, selectableCount
+}
+
+func (w *Window) setGroupSelection(group capabilities.OptionGroup, selected bool) {
+	for _, option := range group.Options {
+		if isCopiesOption(option.ID) {
+			continue
+		}
+		values := optionValues(option)
+		ensureBools(w.selected, option.ID, values)
+		for _, value := range values {
+			w.selected[option.ID][value].Value = selected
+		}
+		if w.optionChecks == nil {
+			w.optionChecks = make(map[string]*widget.Bool)
+		}
+		w.headerCheckbox(w.optionChecks, option.ID).Value = selected && len(values) > 0
+	}
+}
+
+func (w *Window) optionRow(gtx layout.Context, opt capabilities.Option) layout.Dimensions {
+	if isCopiesOption(opt.ID) {
+		return w.copiesOptionRow(gtx, opt)
+	}
+	// Render every value advertised by Fiery. The page-level material list and
+	// scrollbar handle long option groups, so manual selection is never limited
+	// to an arbitrary subset of the server's values.
+	values := optionValues(opt)
+	ensureBools(w.selected, opt.ID, values)
+	defaultValue := fallback(opt.Value, "not reported")
+	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+		items := []layout.FlexChild{
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionHeader(gtx, opt, values) }),
+			layout.Rigid(spacer(3)),
+			layout.Rigid(label(w.theme, fmt.Sprintf("%s · %d value(s) · default: %s", opt.ID, len(values), defaultValue), 12, palette.muted).Layout),
+			layout.Rigid(spacer(8)),
+		}
+		for _, value := range values {
+			value := value
+			checkbox := w.selected[opt.ID][value]
+			displayValue := value
+			if value == opt.Value {
+				displayValue += "  · default"
+			}
+			items = append(items, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Bottom: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					control := material.CheckBox(w.theme, checkbox, displayValue)
+					control.Color = palette.primary
+					return control.Layout(gtx)
+				})
+			}))
+		}
+		if len(values) == 0 {
+			items = append(items, layout.Rigid(label(w.theme, "No selectable values were reported by the server.", 13, palette.muted).Layout))
+		}
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, items...)
+	})
+}
+
+func (w *Window) optionHeader(gtx layout.Context, option capabilities.Option, values []string) layout.Dimensions {
+	if len(values) == 0 {
+		return label(w.theme, option.Label, 15, palette.text).Layout(gtx)
+	}
+	if w.optionChecks == nil {
+		w.optionChecks = make(map[string]*widget.Bool)
+	}
+	allSelected := true
+	for _, value := range values {
+		if !w.selected[option.ID][value].Value {
+			allSelected = false
+			break
+		}
+	}
+	selector := w.headerCheckbox(w.optionChecks, option.ID)
+	selector.Value = allSelected
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+		layout.Flexed(1, label(w.theme, option.Label, 15, palette.text).Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			before := selector.Value
+			control := material.CheckBox(w.theme, selector, "Select all values")
+			control.Color = palette.primary
+			dimensions := control.Layout(gtx)
+			if selector.Value != before {
+				w.setOptionSelection(option.ID, values, selector.Value)
+			}
+			return dimensions
+		}),
+	)
+}
+
+func (w *Window) setOptionSelection(optionID string, values []string, selected bool) {
+	ensureBools(w.selected, optionID, values)
+	for _, value := range values {
+		w.selected[optionID][value].Value = selected
+	}
+}
+
+func (w *Window) headerCheckbox(store map[string]*widget.Bool, key string) *widget.Bool {
+	if store[key] == nil {
+		store[key] = new(widget.Bool)
+	}
+	return store[key]
+}
+
+func (w *Window) copiesOptionRow(gtx layout.Context, opt capabilities.Option) layout.Dimensions {
+	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(label(w.theme, opt.Label, 15, palette.text).Layout),
+			layout.Rigid(spacer(3)),
+			layout.Rigid(label(w.theme, fmt.Sprintf("%s · allowed range: %d-%d", opt.ID, copyvalues.Minimum, copyvalues.Maximum), 12, palette.muted).Layout),
+			layout.Rigid(spacer(8)),
+			layout.Rigid(label(w.theme, "Enter comma-separated copies or inclusive ranges. Examples: 1,5,10,15 · 999 · 5-10 · 5 to 10", 13, palette.muted).Layout),
+			layout.Rigid(spacer(8)),
+			layout.Rigid(fieldBox(w.theme, "Copies", "1,5,10,15 or 5-10", &w.copiesInput, 620)),
+		)
+	})
+}
+
+func isCopiesOption(optionID string) bool {
+	return optionID == "num copies" || optionID == "EFCopies"
 }
 
 func (w *Window) resultsCard(gtx layout.Context) layout.Dimensions {
@@ -603,17 +875,79 @@ func (w *Window) resultsCard(gtx layout.Context) layout.Dimensions {
 	status := w.status
 	w.mu.Unlock()
 	return card(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(sectionTitle(w.theme, "04 Results and activity log")), layout.Rigid(spacer(8)), layout.Rigid(label(w.theme, status, 14, palette.primary).Layout), layout.Rigid(spacer(10)), layout.Rigid(w.resultsTable), layout.Rigid(spacer(10)), layout.Rigid(w.logPanel))
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, sectionTitle(w.theme, "Automation results")),
+					layout.Rigid(secondaryButton(w.theme, &w.exportButton, "Export Excel")),
+				)
+			}),
+			layout.Rigid(spacer(8)),
+			layout.Rigid(label(w.theme, status, 14, palette.primary).Layout),
+			layout.Rigid(spacer(10)),
+			layout.Rigid(w.jobActionsPanel),
+			layout.Rigid(spacer(12)),
+			layout.Rigid(w.resultsTable),
+		)
 	})
 }
+
+func (w *Window) jobActionsPanel(gtx layout.Context) layout.Dimensions {
+	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(label(w.theme, "Job actions", 15, palette.text).Layout),
+			layout.Rigid(spacer(3)),
+			layout.Rigid(label(w.theme, "Cancel supports processing/ripping, waiting-to-print, and printing jobs. Delete permanently removes the specified job in any state.", 13, palette.muted).Layout),
+			layout.Rigid(spacer(8)),
+			layout.Rigid(fieldBox(w.theme, "Job ID", "Enter the exact Fiery job ID", &w.jobActionID, 620)),
+			layout.Rigid(spacer(8)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return row(gtx,
+					secondaryButton(w.theme, &w.cancelJobButton, "Cancel job"),
+					dangerButton(w.theme, &w.deleteJobButton, "Delete job"),
+				)
+			}),
+		)
+	})
+}
+
+func (w *Window) logsCard(gtx layout.Context) layout.Dimensions {
+	w.mu.Lock()
+	status := w.status
+	w.mu.Unlock()
+	diagnosticPath := "Unavailable"
+	if w.diagnostic != nil && w.diagnostic.path != "" {
+		diagnosticPath = w.diagnostic.path
+	}
+	return card(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(sectionTitle(w.theme, "Activity logs")),
+			layout.Rigid(spacer(8)),
+			layout.Rigid(label(w.theme, status, 14, palette.primary).Layout),
+			layout.Rigid(spacer(6)),
+			layout.Rigid(label(w.theme, "Complete diagnostic file: "+diagnosticPath, 13, palette.muted).Layout),
+			layout.Rigid(spacer(10)),
+			layout.Rigid(w.logPanel),
+		)
+	})
+}
+
 func (w *Window) resultsTable(gtx layout.Context) layout.Dimensions {
 	w.mu.Lock()
 	results := append([]resultRow(nil), w.results...)
+	resultCount := w.resultCount
 	w.mu.Unlock()
-	rows := []layout.FlexChild{layout.Rigid(label(w.theme, "Request                                              Method   Status   Duration   Detail", 13, palette.muted).Layout)}
+	rows := []layout.FlexChild{layout.Rigid(label(w.theme, "Job ID                    Job name                              Result   Duration   Detail", 13, palette.muted).Layout)}
+	if len(results) == 0 {
+		rows = append(rows, layout.Rigid(label(w.theme, "No automation results yet.", 13, palette.text).Layout))
+	}
+	if len(results) > maxDisplayedResults {
+		results = results[len(results)-maxDisplayedResults:]
+		rows = append(rows, layout.Rigid(label(w.theme, fmt.Sprintf("Showing latest %d of %d result(s); complete activity remains in the diagnostic log.", len(results), resultCount), 13, palette.muted).Layout))
+	}
 	for _, r := range results {
 		rr := r
-		rows = append(rows, layout.Rigid(label(w.theme, fmt.Sprintf("%-48s %-7s %-8s %-9s %s", short(rr.File, 46), rr.Method, rr.Status, rr.Duration, short(rr.Detail, 80)), 13, palette.text).Layout))
+		rows = append(rows, layout.Rigid(label(w.theme, fmt.Sprintf("%-24s %-37s %-8s %-10s %s", short(rr.JobID, 22), short(rr.JobName, 35), rr.Result, rr.Duration, short(rr.Detail, 80)), 13, palette.text).Layout))
 	}
 	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
@@ -622,11 +956,17 @@ func (w *Window) resultsTable(gtx layout.Context) layout.Dimensions {
 func (w *Window) logPanel(gtx layout.Context) layout.Dimensions {
 	w.mu.Lock()
 	lines := append([]string(nil), w.log...)
+	logCount := w.logCount
 	w.mu.Unlock()
-	if len(lines) > 8 {
-		lines = lines[len(lines)-8:]
+	if len(lines) > maxDisplayedLogLines {
+		lines = lines[len(lines)-maxDisplayedLogLines:]
 	}
-	rows := make([]layout.FlexChild, 0, len(lines))
+	rows := make([]layout.FlexChild, 0, len(lines)+1)
+	if len(lines) == 0 {
+		rows = append(rows, layout.Rigid(label(w.theme, "No activity messages yet.", 13, palette.text).Layout))
+	} else if logCount > len(lines) {
+		rows = append(rows, layout.Rigid(label(w.theme, fmt.Sprintf("Showing latest %d of %d message(s); the diagnostic file contains the complete log.", len(lines), logCount), 13, palette.muted).Layout))
+	}
 	for _, l := range lines {
 		line := l
 		rows = append(rows, layout.Rigid(label(w.theme, line, 13, palette.text).Layout))
@@ -642,10 +982,14 @@ func (w *Window) testServerConnection() {
 		w.setServerTestStatus("Missing server details")
 		return
 	}
+	if !w.testingServer.CompareAndSwap(false, true) {
+		return
+	}
 	w.setServerTestStatus("Testing...")
 	w.setStatus("Testing server connection...")
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	w.launchBackground("Server connection test", func() {
+		defer w.testingServer.Store(false)
+		ctx, cancel := context.WithTimeout(w.rootContext(), 30*time.Second)
 		defer cancel()
 		client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
 		if err != nil {
@@ -663,7 +1007,169 @@ func (w *Window) testServerConnection() {
 		w.setServerTestStatus("Connection OK")
 		w.setStatus("Server connection OK")
 		w.addLog("Server connection test passed for %s", server.IPAddress)
-	}()
+	})
+}
+
+func (w *Window) startManualJobAction(action string) {
+	jobID := strings.TrimSpace(w.jobActionID.Text())
+	if jobID == "" {
+		w.setStatus("Enter the exact Fiery job ID before using a job action.")
+		return
+	}
+	server, ok := w.server()
+	if !ok {
+		return
+	}
+	var title, message string
+	switch action {
+	case "cancel":
+		title = "Cancel Fiery job"
+		message = fmt.Sprintf("Cancel job %s?\n\nThe application will proceed only if Fiery reports processing/ripping, waiting to print, or printing.", jobID)
+	case "delete":
+		title = "Permanently delete Fiery job"
+		message = fmt.Sprintf("Permanently delete job %s?\n\nDelete is allowed in any job state and cannot be undone.", jobID)
+	default:
+		w.setStatus("Unsupported job action: " + action)
+		return
+	}
+	confirmed, err := confirmDestructiveAction(title, message)
+	if err != nil {
+		w.setStatus("Could not open job action confirmation: " + err.Error())
+		return
+	}
+	if !confirmed || !w.managingJob.CompareAndSwap(false, true) {
+		return
+	}
+	w.setStatus(fmt.Sprintf("Preparing to %s job %s...", action, jobID))
+	w.launchBackground("Fiery job "+action, func() {
+		defer func() {
+			w.managingJob.Store(false)
+			w.invalidate()
+		}()
+		ctx, cancel := context.WithTimeout(w.rootContext(), 90*time.Second)
+		defer cancel()
+		client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
+		if err != nil {
+			w.finishManualJobAction(action, jobID, err)
+			return
+		}
+		session, err := client.Login(ctx)
+		if err != nil {
+			w.finishManualJobAction(action, jobID, fmt.Errorf("login: %w", err))
+			return
+		}
+		switch action {
+		case "cancel":
+			attributes, getErr := client.GetJobAttributes(ctx, session, jobID)
+			if getErr != nil {
+				w.finishManualJobAction(action, jobID, fmt.Errorf("check job state: %w", getErr))
+				return
+			}
+			cancelable, state := cancelableJob(attributes)
+			if !cancelable {
+				w.finishManualJobAction(action, jobID, fmt.Errorf("job is not processing/ripping, waiting to print, or printing (reported state: %s)", state))
+				return
+			}
+			w.addLog("Cancel job %s accepted precondition: %s", jobID, state)
+			err = client.CancelJob(ctx, session, jobID)
+		case "delete":
+			err = client.DeleteJob(ctx, session, jobID)
+		}
+		w.finishManualJobAction(action, jobID, err)
+	})
+}
+
+func (w *Window) finishManualJobAction(action, jobID string, err error) {
+	if err != nil {
+		w.setStatus(fmt.Sprintf("Could not %s job %s: %v", action, jobID, err))
+		w.addLog("JOB_ACTION action=%s job_id=%s result=ERROR error=%v", action, jobID, err)
+		return
+	}
+	w.setStatus(fmt.Sprintf("Job %s %s request completed successfully.", jobID, action))
+	w.addLog("JOB_ACTION action=%s job_id=%s result=PASS", action, jobID)
+}
+
+func activelyProcessingJob(attributes map[string]string) (bool, string) {
+	reported := make([]string, 0, 4)
+	for key, value := range attributes {
+		keyLower := strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		if strings.HasPrefix(keyLower, "is ") {
+			activeKey := strings.Contains(keyLower, "printing") || strings.Contains(keyLower, "processing") || strings.Contains(keyLower, "ripping")
+			if activeKey && isTruthy(value) {
+				return true, strings.TrimSpace(key) + "=" + value
+			}
+		}
+		stateKey := keyLower == "status" || keyLower == "state" || keyLower == "display status" || strings.Contains(keyLower, "job status") || strings.Contains(keyLower, "current action")
+		if !stateKey || value == "" {
+			continue
+		}
+		reported = append(reported, strings.TrimSpace(key)+"="+value)
+		valueLower := strings.ToLower(value)
+		waitingOrTerminal := false
+		for _, term := range []string{"done", "complete", "cancel", "abort", "error", "fail", "held", "queue", "wait", "ready"} {
+			if strings.Contains(valueLower, term) {
+				waitingOrTerminal = true
+				break
+			}
+		}
+		if waitingOrTerminal {
+			continue
+		}
+		for _, term := range []string{"printing", "processing", "ripping"} {
+			if strings.Contains(valueLower, term) {
+				return true, strings.TrimSpace(key) + "=" + value
+			}
+		}
+	}
+	if len(reported) == 0 {
+		return false, "unknown"
+	}
+	sort.Strings(reported)
+	return false, strings.Join(reported, ", ")
+}
+
+func waitingToPrintJob(attributes map[string]string) (bool, string) {
+	for _, key := range []string{"queued for printing?", "is committed to print?", "waiting to print?", "ready to print?"} {
+		if isTruthy(attributes[key]) {
+			return true, key + "=" + strings.TrimSpace(attributes[key])
+		}
+	}
+	for _, key := range []string{"status", "state", "display status", "current action"} {
+		value := strings.TrimSpace(attributes[key])
+		valueLower := strings.ToLower(value)
+		for _, phrase := range []string{"waiting to print", "ready to print", "queued for print", "print queue"} {
+			if strings.Contains(valueLower, phrase) {
+				return true, key + "=" + value
+			}
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(attributes["job release state"]), "production") {
+		if active, _ := activelyProcessingJob(attributes); !active && !printCompleted(attributes) {
+			return true, "job release state=production"
+		}
+	}
+	return false, "unknown"
+}
+
+func cancelableJob(attributes map[string]string) (bool, string) {
+	if active, state := activelyProcessingJob(attributes); active {
+		return true, state
+	}
+	if waiting, state := waitingToPrintJob(attributes); waiting {
+		return true, state
+	}
+	_, state := activelyProcessingJob(attributes)
+	return false, state
+}
+
+func isTruthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (w *Window) captureCapabilities() {
@@ -674,12 +1180,14 @@ func (w *Window) captureCapabilities() {
 	if !ok {
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	if !w.running.CompareAndSwap(false, true) {
+		return
+	}
+	ctx, cancel := context.WithCancel(w.rootContext())
 	w.cancel = cancel
-	w.running.Store(true)
 	w.setCaptureProgress(true, 0.05, "Preparing server capability capture...")
 	w.setStatus("Getting capabilities from server...")
-	go func() {
+	w.launchBackground("Capability capture", func() {
 		defer func() {
 			w.running.Store(false)
 			w.setCaptureProgress(false, 1, "Capability capture finished")
@@ -698,13 +1206,25 @@ func (w *Window) captureCapabilities() {
 		}
 		w.setCaptureProgress(true, 0.45, "Discovering v5/v4 server endpoints and properties...")
 		snap := client.DiscoverCapabilities(ctx, session)
+		if err := ctx.Err(); err != nil {
+			w.setStatus("Capability capture cancelled")
+			return
+		}
 		w.setCaptureProgress(true, 0.75, "Normalizing capabilities and running preflight checks...")
 		model := capabilities.FromSnapshot(snap)
 		env := preflight.Run(snap, model)
 		w.setCaptureProgress(true, 0.90, "Saving capability and environment snapshots...")
-		path, err := client.SaveCapabilitySnapshot(snap, captureDirectory())
-		if err != nil {
-			w.addLog("Capability snapshot save failed: %s", err)
+		capabilityPath, capabilityErr := client.SaveCapabilitySnapshot(snap, captureDirectory())
+		if capabilityErr != nil {
+			w.addLog("Capability snapshot save failed: %s", capabilityErr)
+		} else {
+			w.addLog("Saved capability snapshot: %s", capabilityPath)
+		}
+		environmentPath, environmentErr := preflight.Save(env, captureDirectory())
+		if environmentErr != nil {
+			w.addLog("Environment snapshot save failed: %s", environmentErr)
+		} else {
+			w.addLog("Saved environment snapshot: %s", environmentPath)
 		}
 		w.mu.Lock()
 		w.capabilities = model
@@ -712,8 +1232,7 @@ func (w *Window) captureCapabilities() {
 		w.setCaptureProgress(true, 1.0, "Capabilities loaded successfully.")
 		w.setStatus("Capabilities loaded. Preflight: " + env.OverallStatus)
 		w.logCapabilitySummary(model)
-		w.addLog("Saved capability snapshot: %s", path)
-	}()
+	})
 }
 
 func (w *Window) setCaptureProgress(active bool, progress float32, phase string) {
@@ -731,13 +1250,7 @@ func (w *Window) setCaptureProgress(active bool, progress float32, phase string)
 	if phase != "" {
 		w.diagnostic.printf("CAPTURE: %.0f%% %s", progress*100, phase)
 	}
-	w.window.Invalidate()
-}
-
-func (w *Window) isCaptureActive() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.captureActive
+	w.invalidate()
 }
 
 func (w *Window) logCapabilitySummary(model capabilities.Model) {
@@ -769,22 +1282,32 @@ func (w *Window) startAPITrace() {
 		w.setStatus("API trace requires at least one supported test file.")
 		return
 	}
-	combos := w.selectedCombinations()
+	combos, _, err := w.selectedCombinations()
+	if err != nil {
+		w.setStatus("API trace copies input is invalid: " + err.Error())
+		return
+	}
 	if len(combos) == 0 || len(combos[0]) == 0 {
 		w.setStatus("Select at least one capability value before capturing an API trace.")
 		return
 	}
 	attrs := combinationToAttributes(combos[0])
-	ctx, cancel := context.WithCancel(context.Background())
+	mode := runModes[0]
+	if modes := w.selectedRunModes(); len(modes) > 0 {
+		mode = modes[0]
+	}
+	if !w.running.CompareAndSwap(false, true) {
+		return
+	}
+	ctx, cancel := context.WithCancel(w.rootContext())
 	w.cancel = cancel
-	w.running.Store(true)
 	w.setStatus("Capturing controlled API trace...")
-	go func() {
+	w.launchBackground("API trace", func() {
 		defer func() {
 			w.running.Store(false)
-			w.window.Invalidate()
+			w.invalidate()
 		}()
-		report := w.runAPITrace(ctx, server, selectedFiles[0], attrs)
+		report := w.runAPITrace(ctx, server, selectedFiles[0], attrs, mode)
 		path, saveErr := saveAPITrace(report)
 		if saveErr != nil {
 			w.setStatus("API trace save failed: " + saveErr.Error())
@@ -796,11 +1319,10 @@ func (w *Window) startAPITrace() {
 			return
 		}
 		w.setStatus("API trace completed: " + report.Result + ". See " + path)
-	}()
+	})
 }
 
-func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection, file string, attrs map[string]string) apiTraceReport {
-	mode := runModes[1] // Process and Hold provides deterministic post-RIP readback.
+func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection, file string, attrs map[string]string, mode runMode) apiTraceReport {
 	report := apiTraceReport{
 		CapturedAt:     time.Now().Format(time.RFC3339Nano),
 		Server:         server.IPAddress,
@@ -820,6 +1342,7 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 		report.Error = err.Error()
 		return report
 	}
+	report.SessionLogin = session.LoginPath
 	imp, err := client.ImportJobToQueue(ctx, session, file, "hold")
 	report.Import = imp
 	report.JobID = imp.JobID
@@ -848,7 +1371,11 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 		capture("lifecycle failed")
 		return report
 	}
-	capture("done ripping")
+	if modeIncludesAction(mode, "rip") {
+		capture("done ripping")
+	} else {
+		capture("after " + strings.ToLower(mode.Label) + " lifecycle")
+	}
 	final, err := w.readBackAttributes(ctx, client, session, imp.JobID, attrs)
 	report.Final = final
 	if err != nil {
@@ -857,7 +1384,7 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 		return report
 	}
 	capture("final verification")
-	if attributesMatch(final, attrs) {
+	if w.attributesMatch(final, attrs) {
 		report.Result = "PASS"
 	} else {
 		report.Result = "FAIL"
@@ -894,12 +1421,13 @@ func (w *Window) startRun() {
 		w.setStatus("File selection failed: " + err.Error())
 		return
 	}
-	workers, _ := strconv.Atoi(strings.TrimSpace(w.workers.Text()))
-	if workers < 1 {
-		workers = 1
+	workers := parseWorkerCount(w.workers.Text())
+	combos, axes, err := w.selectedCombinations()
+	if err != nil {
+		w.setStatus("Copies input is invalid: " + err.Error())
+		return
 	}
-	combos := w.selectedCombinations()
-	w.logSelectedCombinations(combos)
+	w.logSelectedCombinations(combos, axes)
 	modes := w.selectedRunModes()
 	if len(modes) == 0 {
 		w.setStatus("Select at least one run mode.")
@@ -909,21 +1437,77 @@ func (w *Window) startRun() {
 		w.setStatus("Selected capabilities require RIP before strict verification. Select Process and Hold or RIP run mode.")
 		return
 	}
+	plannedTests := plannedTestCount(len(selectedFiles), len(combos), len(modes))
+	if plannedTests == 0 {
+		w.setStatus("No executable tests were generated from the selected files, values, and run modes.")
+		return
+	}
+	requestedWorkers := workers
+	workers = effectiveWorkerCount(workers, plannedTests)
 	w.addLog("Selected run modes: %s", formatRunModes(modes))
-	ctx, cancel := context.WithCancel(context.Background())
-	w.cancel = cancel
-	w.running.Store(true)
+	w.addLog("Parallel jobs requested=%d effective=%d planned_tests=%d", requestedWorkers, workers, plannedTests)
+	if !w.running.CompareAndSwap(false, true) {
+		return
+	}
+	startedAt := time.Now()
+	resultStore, err := reportxlsx.NewResultStore(diagnosticsDirectory(), startedAt)
+	if err != nil {
+		w.running.Store(false)
+		w.setStatus("Unable to initialize Excel result data: " + err.Error())
+		return
+	}
 	w.mu.Lock()
+	capabilityModel := w.capabilities
+	previousStore := w.resultStore
+	w.resultStore = resultStore
+	w.resultStoreError = ""
+	w.lastRun = reportxlsx.Summary{
+		StartedAt:         startedAt,
+		Status:            "Running",
+		ServerIP:          server.IPAddress,
+		ServerName:        capabilityModel.ServerName,
+		SerialNumber:      capabilityModel.SerialNumber,
+		ServerVersion:     capabilityModel.Version,
+		QueuesDiscovered:  len(capabilityModel.Queues),
+		OptionsDiscovered: len(capabilityModel.Options),
+		TestFileCount:     len(selectedFiles),
+		CombinationCount:  len(combos),
+		PlannedTests:      plannedTests,
+		Workers:           workers,
+		Strategy:          string(w.strategy),
+		RunModes:          runModeLabels(modes),
+	}
 	w.results = nil
+	w.resultCount = 0
 	w.mu.Unlock()
+	if previousStore != nil {
+		if err := previousStore.Close(); err != nil {
+			w.diagnostic.printf("RESULT_STORE: close previous store error=%v", err)
+		}
+	}
+	ctx, cancel := context.WithCancel(w.rootContext())
+	w.cancel = cancel
 	w.setStatus("Running automation...")
-	go w.runAutomation(ctx, server, selectedFiles, workers, combos, modes)
+	w.launchBackground("Automation run", func() {
+		w.runAutomation(ctx, server, selectedFiles, workers, combos, modes)
+	})
 }
 
 func (w *Window) runAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, combos []combinations.Combination, modes []runMode) {
+	finalStatus := "Failed"
 	defer func() {
+		finalizeErr := w.finishRun(finalStatus)
 		w.running.Store(false)
-		w.window.Invalidate()
+		switch {
+		case finalizeErr != nil:
+			w.setStatus("Run ended, but Excel result data could not be finalized: " + finalizeErr.Error())
+		case finalStatus == "Completed":
+			w.setStatus("Completed. See Results or Activity logs.")
+		case finalStatus == "Cancelled":
+			w.setStatus("Cancelled")
+		default:
+			w.invalidate()
+		}
 	}()
 	client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
 	if err != nil {
@@ -935,6 +1519,9 @@ func (w *Window) runAutomation(ctx context.Context, server model.ServerConnectio
 		w.setStatus("Login failed: " + err.Error())
 		return
 	}
+	w.mu.Lock()
+	w.lastRun.SessionLoginPath = session.LoginPath
+	w.mu.Unlock()
 	jobs := make(chan struct {
 		file  string
 		attrs map[string]string
@@ -946,7 +1533,7 @@ func (w *Window) runAutomation(ctx context.Context, server model.ServerConnectio
 		go func() {
 			defer wg.Done()
 			for job := range jobs {
-				w.executeJob(ctx, client, session, job.file, job.attrs, job.mode)
+				w.executeJobSafely(ctx, client, session, job.file, job.attrs, job.mode)
 			}
 		}()
 	}
@@ -957,7 +1544,8 @@ func (w *Window) runAutomation(ctx context.Context, server model.ServerConnectio
 				case <-ctx.Done():
 					close(jobs)
 					wg.Wait()
-					w.setStatus("Cancelled")
+					finalStatus = "Cancelled"
+					w.setStatus("Cancelling and finalizing automation results...")
 					return
 				case jobs <- struct {
 					file  string
@@ -970,19 +1558,50 @@ func (w *Window) runAutomation(ctx context.Context, server model.ServerConnectio
 	}
 	close(jobs)
 	wg.Wait()
-	w.setStatus("Completed. See results and logs.")
-}
-
-func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session fiery.Session, file string, attrs map[string]string, mode runMode) {
-	start := time.Now()
-	imp, err := client.ImportJobToQueue(ctx, session, file, mode.ImportQueue)
-	if err != nil {
-		w.addResult(file, "POST", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
+	if ctx.Err() != nil {
+		finalStatus = "Cancelled"
+		w.setStatus("Cancelling and finalizing automation results...")
 		return
 	}
+	finalStatus = "Completed"
+	w.setStatus("Finalizing automation results...")
+}
+
+func (w *Window) executeJobSafely(ctx context.Context, client *fiery.Client, session fiery.Session, file string, attrs map[string]string, mode runMode) {
+	result := reportxlsx.Result{JobName: filepath.Base(file), Mode: mode.Label, SetValues: cloneStringMap(attrs)}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			stack := debug.Stack()
+			_ = writeCrashReport(fmt.Sprintf("panic while processing %s in mode %s: %v", filepath.Base(file), mode.Label, recovered), stack)
+			w.diagnostic.printf("PANIC: file=%s mode=%s value=%v stack=%s", filepath.Base(file), mode.Label, recovered, stack)
+			result.Result = "ERROR"
+			result.Detail = fmt.Sprintf("mode=%s: unexpected internal error; see logs/crash.log", mode.Label)
+			w.addResult(result)
+		}
+	}()
+	w.executeJob(ctx, client, session, file, attrs, mode, &result)
+}
+
+func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session fiery.Session, file string, attrs map[string]string, mode runMode, result *reportxlsx.Result) {
+	start := time.Now()
+	finish := func(status, detail string, got map[string]string) {
+		result.Result = status
+		result.DurationMS = time.Since(start).Milliseconds()
+		result.Detail = detail
+		result.JobName = jobNameFromAttributes(got, result.JobName)
+		result.GetValues = selectedReadbackValues(got, attrs)
+		w.addResult(*result)
+	}
+
+	imp, err := client.ImportJobToQueue(ctx, session, file, mode.ImportQueue)
+	if err != nil {
+		finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
+		return
+	}
+	result.JobID = imp.JobID
 	w.addLog("Imported %s as job %s into queue %s for mode %s", filepath.Base(file), imp.JobID, mode.ImportQueue, mode.Label)
 	if err := w.confirmImport(ctx, client, session, imp.JobID); err != nil {
-		w.addResult(file, "GET", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
+		finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
 		return
 	}
 	if len(attrs) > 0 {
@@ -991,26 +1610,47 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		// overwritten when Fiery finishes constructing the job ticket.
 		w.addLog("Waiting for job %s status=done spooling before setting attributes", imp.JobID)
 		if _, err := w.waitJobCondition(ctx, client, session, imp.JobID, "done spooling before attribute update", 4*time.Minute, time.Second, statusEquals("done spooling")); err != nil {
-			w.addResult(file, "GET", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
+			finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
 			return
 		}
 		w.addLog("Setting job %s attributes after done spooling: %s", imp.JobID, formatAttributes(attrs))
 		if err := client.UpdateJobAttributes(ctx, session, imp.JobID, attrs); err != nil {
-			w.addResult(file, "POST", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
+			finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
 			return
 		}
 		if err := w.confirmAttributeUpdate(ctx, client, session, imp.JobID, attrs, mode); err != nil {
-			w.addResult(file, "GET", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
+			finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
 			return
 		}
 	}
+	if modeIncludesAction(mode, "delete") {
+		got, readErr := w.readBackAttributes(ctx, client, session, imp.JobID, attrs)
+		deleteErr := client.DeleteJob(ctx, session, imp.JobID)
+		if deleteErr != nil {
+			finish("ERROR", fmt.Sprintf("mode=%s: delete failed: %v", mode.Label, deleteErr), got)
+			return
+		}
+		w.addLog("Deleted job %s successfully for Delete mode", imp.JobID)
+		if readErr != nil {
+			finish("ERROR", fmt.Sprintf("mode=%s: job deleted, but pre-delete readback failed: %v", mode.Label, readErr), got)
+			return
+		}
+		for key, want := range attrs {
+			if !w.attributeValueMatches(key, got[key], want) {
+				finish("FAIL", fmt.Sprintf("mode=%s: job deleted, but pre-delete verification failed for %s set=%q got=%q", mode.Label, key, want, got[key]), got)
+				return
+			}
+		}
+		finish("PASS", fmt.Sprintf("mode=%s: job was deleted successfully using its dedicated test job", mode.Label), got)
+		return
+	}
 	if err := w.performModeLifecycle(ctx, client, session, imp.JobID, mode); err != nil {
-		w.addResult(file, "POST", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
+		finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
 		return
 	}
 	got, err := w.readBackAttributes(ctx, client, session, imp.JobID, attrs)
 	if err != nil {
-		w.addResult(file, "GET", "ERR", time.Since(start), fmt.Sprintf("mode=%s: %v", mode.Label, err))
+		finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), got)
 		return
 	}
 	status := "PASS"
@@ -1019,17 +1659,17 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		detail = fmt.Sprintf("mode=%s: import/lifecycle completed; no job attributes were selected for set/get verification", mode.Label)
 	}
 	for k, v := range attrs {
-		if got[k] != v {
+		if !w.attributeValueMatches(k, got[k], v) {
 			status = "FAIL"
 			detail = fmt.Sprintf("mode=%s: %s set=%q got=%q status=%q state=%q display=%q recent=%q related=%s availableKeys=%s", mode.Label, k, v, got[k], got["status"], got["state"], got["display status"], got["recent action"], relatedReadbackValues(got), short(strings.Join(sortedKeys(got), ","), 220))
 			if requiresRipReadback(k) && !modeIncludesAction(mode, "rip") {
-				detail += "; note=this attribute is typically readable only after RIP, select RIP or Process and Hold for strict verification"
+				detail += "; note=this attribute may require RIP for strict verification"
 			}
 			w.logRawPostmanComparison(ctx, client, session, imp.JobID)
 			break
 		}
 	}
-	w.addResult(file, http.MethodPost, status, time.Since(start), detail)
+	finish(status, detail, got)
 }
 
 func (w *Window) confirmImport(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string) error {
@@ -1045,10 +1685,9 @@ func (w *Window) confirmAttributeUpdate(ctx context.Context, client *fiery.Clien
 		return nil
 	}
 	// Attribute POST success means the server accepted the update request. Some
-	// Fiery attributes are not readable immediately, and some command/rerip
-	// attributes such as EFResolution are materialized only after RIP. Therefore
-	// do not fail the run here; final strict set/get verification runs after the
-	// selected lifecycle actions complete.
+	// Fiery attributes are not readable immediately, so do not fail the run here;
+	// final strict set/get verification runs after the selected lifecycle actions
+	// complete.
 	if modeIncludesAction(mode, "rip") {
 		w.addLog("Attribute update accepted for job %s; final set/get verification will run after RIP", jobID)
 	} else {
@@ -1061,26 +1700,31 @@ func (w *Window) readBackAttributes(ctx context.Context, client *fiery.Client, s
 	if len(expected) == 0 {
 		return client.GetJobAttributes(ctx, session, jobID)
 	}
-	deadline := time.NewTimer(45 * time.Second)
+	deadline := time.NewTimer(20 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	var got map[string]string
 	var err error
 	for {
-		got, err = client.GetJobAttributes(ctx, session, jobID)
-		if err != nil {
-			w.diagnostic.printf("READBACK: job=%s attempt=error error=%v", jobID, err)
-			return nil, err
-		}
-		w.logAttributeReadback(jobID, got, expected)
-		if attributesMatch(got, expected) {
-			return got, nil
+		gotAttempt, getErr := client.GetJobAttributes(ctx, session, jobID)
+		err = getErr
+		if getErr != nil {
+			w.diagnostic.printf("READBACK: job=%s attempt=error error=%v", jobID, getErr)
+		} else {
+			got = gotAttempt
+			w.logAttributeReadback(jobID, got, expected)
+			if w.attributesMatch(got, expected) {
+				return got, nil
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return got, ctx.Err()
 		case <-deadline.C:
+			if got == nil && err != nil {
+				return nil, fmt.Errorf("read back job %s attributes: %w", jobID, err)
+			}
 			return got, nil
 		case <-ticker.C:
 		}
@@ -1102,7 +1746,7 @@ func (w *Window) logAttributeReadback(jobID string, got, expected map[string]str
 	}{
 		JobID:         jobID,
 		Expected:      expected,
-		Matched:       attributesMatch(got, expected),
+		Matched:       w.attributesMatch(got, expected),
 		Status:        got["status"],
 		State:         got["state"],
 		DisplayStatus: got["display status"],
@@ -1121,26 +1765,34 @@ func (w *Window) logAttributeReadback(jobID string, got, expected map[string]str
 
 func (w *Window) logRawPostmanComparison(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string) {
 	for _, response := range client.GetRawJobResponses(ctx, session, jobID) {
-		w.diagnostic.printf("POSTMAN_COMPARE: method=%s endpoint=%s status=%d accept=application/json body=%s", response.Method, response.Endpoint, response.StatusCode, response.Body)
+		w.diagnostic.printf("POSTMAN_COMPARE: method=%s endpoint=%s proto=%s status=%d accept=*/* login=%s body=%s", response.Method, response.Endpoint, response.ResponseProto, response.StatusCode, session.LoginPath, response.Body)
 	}
 }
 
-func attributesPresent(got, expected map[string]string) bool {
-	for key := range expected {
-		if _, ok := got[key]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
-func attributesMatch(got, expected map[string]string) bool {
+func (w *Window) attributesMatch(got, expected map[string]string) bool {
 	for key, want := range expected {
-		if got[key] != want {
+		if !w.attributeValueMatches(key, got[key], want) {
 			return false
 		}
 	}
 	return true
+}
+
+func (w *Window) attributeValueMatches(key, got, want string) bool {
+	if got == want {
+		return true
+	}
+	// Fiery often omits job attributes whose value is the server default. Treat a
+	// missing/empty readback as a match only when the selected value equals the
+	// discovered default for that option.
+	if strings.TrimSpace(got) != "" {
+		return false
+	}
+	w.mu.Lock()
+	model := w.capabilities
+	w.mu.Unlock()
+	option, ok := model.OptionByID(key)
+	return ok && option.Value == want
 }
 
 func (w *Window) performModeLifecycle(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, mode runMode) error {
@@ -1190,9 +1842,68 @@ func (w *Window) performModeLifecycle(ctx context.Context, client *fiery.Client,
 			if _, err := w.waitJobCondition(ctx, client, session, jobID, "print completion", 10*time.Minute, 3*time.Second, printCompleted); err != nil {
 				return err
 			}
+		case "cancel_ripping":
+			w.addLog("Waiting for dedicated cancel job %s status=done spooling before RIP", jobID)
+			if _, err := w.waitJobCondition(ctx, client, session, jobID, "done spooling before cancel-during-RIP", 4*time.Minute, time.Second, statusEquals("done spooling")); err != nil {
+				return err
+			}
+			w.addLog("Starting RIP for dedicated cancel test job %s", jobID)
+			if err := client.JobAction(ctx, session, jobID, "rip"); err != nil {
+				return err
+			}
+			if err := w.cancelDedicatedJob(ctx, client, session, jobID, "processing/ripping", 3*time.Minute, func(attributes map[string]string) bool {
+				active, state := activelyProcessingJob(attributes)
+				return active && !strings.Contains(strings.ToLower(state), "printing")
+			}); err != nil {
+				return err
+			}
+		case "cancel_waiting":
+			if err := w.cancelDedicatedJob(ctx, client, session, jobID, "waiting to print", 2*time.Minute, func(attributes map[string]string) bool {
+				waiting, _ := waitingToPrintJob(attributes)
+				return waiting
+			}); err != nil {
+				return err
+			}
+		case "cancel_printing":
+			w.addLog("Starting print for dedicated cancel test job %s", jobID)
+			if err := client.JobAction(ctx, session, jobID, "print"); err != nil {
+				return err
+			}
+			if err := w.cancelDedicatedJob(ctx, client, session, jobID, "printing", 3*time.Minute, printingJob); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+func (w *Window) cancelDedicatedJob(ctx context.Context, client *fiery.Client, session fiery.Session, jobID, scenario string, timeout time.Duration, ready func(map[string]string) bool) error {
+	w.addLog("Waiting for job %s cancellation scenario=%s", jobID, scenario)
+	if _, err := w.waitJobCondition(ctx, client, session, jobID, scenario+" before cancel", timeout, 250*time.Millisecond, ready); err != nil {
+		return fmt.Errorf("cancel was not sent because the job never reached %s: %w", scenario, err)
+	}
+	w.addLog("Cancelling job %s in scenario=%s", jobID, scenario)
+	if err := client.CancelJob(ctx, session, jobID); err != nil {
+		return err
+	}
+	if _, err := w.waitJobCondition(ctx, client, session, jobID, "cancel acknowledgement", 2*time.Minute, 500*time.Millisecond, cancelObserved); err != nil {
+		return err
+	}
+	w.addLog("Cancel acknowledged for job %s in scenario=%s", jobID, scenario)
+	return nil
+}
+
+func printingJob(attributes map[string]string) bool {
+	if isTruthy(attributes["is printing?"]) {
+		return true
+	}
+	for _, key := range []string{"status", "state", "display status", "current action"} {
+		value := strings.ToLower(strings.TrimSpace(attributes[key]))
+		if strings.Contains(value, "printing") && !strings.Contains(value, "done") && !strings.Contains(value, "complete") {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *Window) waitJobCondition(ctx context.Context, client *fiery.Client, session fiery.Session, jobID, description string, timeout, interval time.Duration, match func(map[string]string) bool) (map[string]string, error) {
@@ -1256,6 +1967,21 @@ func printCompleted(attrs map[string]string) bool {
 	return strings.Contains(status, "done print") || strings.Contains(status, "printed")
 }
 
+func cancelObserved(attrs map[string]string) bool {
+	for _, key := range []string{"status", "state", "display status", "recent action", "current action"} {
+		value := strings.ToLower(strings.TrimSpace(attrs[key]))
+		if strings.Contains(value, "cancel") || strings.Contains(value, "abort") {
+			return true
+		}
+	}
+	cancelable, state := cancelableJob(attrs)
+	if cancelable || state == "unknown" {
+		return false
+	}
+	state = strings.ToLower(state)
+	return !strings.Contains(state, "done print") && !strings.Contains(state, "complete") && !strings.Contains(state, "printed")
+}
+
 func modeIncludesAction(mode runMode, want string) bool {
 	for _, action := range mode.Actions {
 		if action == want {
@@ -1267,7 +1993,7 @@ func modeIncludesAction(mode runMode, want string) bool {
 
 func requiresRipReadback(key string) bool {
 	switch key {
-	case "EFResolution", "EFPrintSpeed", "EFRotateDocument":
+	case "EFPrintSpeed", "EFRotateDocument":
 		return true
 	default:
 		return false
@@ -1309,24 +2035,12 @@ func (w *Window) server() (model.ServerConnection, bool) {
 func (w *Window) fileMode() model.FileSelectionMode {
 	switch w.fileModeGroup.Value {
 	case "single":
-		w.selectionMode = 1
 		return model.FileSelectionSingle
 	case "random":
-		w.selectionMode = 2
 		return model.FileSelectionRandom
 	default:
-		w.selectionMode = 0
 		return model.FileSelectionAll
 	}
-}
-
-func (w *Window) currentRunModeIndex() int {
-	idx, err := strconv.Atoi(w.runModeGroup.Value)
-	if err != nil || idx < 0 || idx >= len(runModes) {
-		return w.runModeIndex
-	}
-	w.runModeIndex = idx
-	return idx
 }
 
 func (w *Window) selectedRunModes() []runMode {
@@ -1342,12 +2056,30 @@ func (w *Window) selectedRunModes() []runMode {
 	return modes
 }
 
-func formatRunModes(modes []runMode) string {
+func runModeLabels(modes []runMode) []string {
 	labels := make([]string, 0, len(modes))
 	for _, mode := range modes {
 		labels = append(labels, mode.Label)
 	}
-	return strings.Join(labels, ", ")
+	return labels
+}
+
+func formatRunModes(modes []runMode) string {
+	return strings.Join(runModeLabels(modes), ", ")
+}
+
+func plannedTestCount(counts ...int) int64 {
+	total := int64(1)
+	for _, count := range counts {
+		if count <= 0 {
+			return 0
+		}
+		if int64(count) > math.MaxInt64/total {
+			return math.MaxInt64
+		}
+		total *= int64(count)
+	}
+	return total
 }
 
 func runModesIncludeAction(modes []runMode, action string) bool {
@@ -1370,14 +2102,16 @@ func combinationsRequireRipReadback(combos []combinations.Combination) bool {
 	return false
 }
 
-func (w *Window) selectedCombinations() []combinations.Combination {
+func (w *Window) selectedCombinations() ([]combinations.Combination, []combinations.Axis, error) {
 	w.mu.Lock()
 	model := w.capabilities
 	w.mu.Unlock()
-	axes := make([]combinations.Axis, 0, len(w.selected))
+	axes := make([]combinations.Axis, 0, len(w.selected)+1)
 	ids := make([]string, 0, len(w.selected))
 	for id := range w.selected {
-		ids = append(ids, id)
+		if !isCopiesOption(id) {
+			ids = append(ids, id)
+		}
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
@@ -1396,56 +2130,63 @@ func (w *Window) selectedCombinations() []combinations.Combination {
 		sort.Strings(vals)
 		axes = append(axes, combinations.Axis{Name: id, Values: vals})
 	}
-	if len(axes) == 0 {
-		if w.strategy == combinations.StrategySelected {
-			return []combinations.Combination{{}}
-		}
+	if len(axes) == 0 && w.strategy != combinations.StrategySelected {
 		axes = defaultPermutationAxes(model)
-		if len(axes) == 0 {
-			return []combinations.Combination{{}}
+	}
+	copySelection := copyvalues.Selection{}
+	if copyOption, ok := copiesOption(model); ok {
+		var err error
+		copySelection, err = copyvalues.Parse(w.copiesInput.Text())
+		if err != nil {
+			return nil, nil, err
 		}
+		axes = append(axes, combinations.Axis{Name: copyOption.ID, Values: copySelection.Values})
 	}
-	limit, _ := strconv.Atoi(strings.TrimSpace(w.maxCases.Text()))
-	if limit < 1 {
-		limit = 100
+	if len(axes) == 0 {
+		return []combinations.Combination{{}}, nil, nil
 	}
-	return combinations.GenerateWithStrategy(axes, w.strategy, limit)
+	generationStrategy := w.strategy
+	if copySelection.HasRange && generationStrategy != combinations.StrategyPairwise {
+		// A range requests random distribution. When the complete product fits
+		// under the case limit the random generator still returns every case;
+		// otherwise it samples across the full range instead of taking only the
+		// lowest copy counts.
+		generationStrategy = combinations.StrategyRandom
+	}
+	generated := combinations.GenerateWithStrategy(axes, generationStrategy, parseCaseLimit(w.maxCases.Text()))
+	if copySelection.HasRange && len(generated) > 1 {
+		mathrand.Shuffle(len(generated), func(left, right int) {
+			generated[left], generated[right] = generated[right], generated[left]
+		})
+	}
+	return generated, axes, nil
 }
 
-func (w *Window) logSelectedCombinations(combos []combinations.Combination) {
-	selected := make([]string, 0, len(w.selected))
-	w.mu.Lock()
-	model := w.capabilities
-	w.mu.Unlock()
-	for id, values := range w.selected {
-		vals := selectedValues(values)
-		if len(vals) == 0 {
-			continue
+func copiesOption(model capabilities.Model) (capabilities.Option, bool) {
+	for _, id := range []string{"EFCopies", "num copies"} {
+		if option, ok := model.OptionByID(id); ok {
+			return option, true
 		}
-		if w.strategy != combinations.StrategySelected {
-			if option, ok := model.OptionByID(id); ok && len(optionValues(option)) > len(vals) {
-				vals = optionValues(option)
-			}
-		}
-		sort.Strings(vals)
-		selected = append(selected, fmt.Sprintf("%s=%v", id, vals))
 	}
-	sort.Strings(selected)
+	return capabilities.Option{}, false
+}
+
+func (w *Window) logSelectedCombinations(combos []combinations.Combination, axes []combinations.Axis) {
+	if copySelection, err := copyvalues.Parse(w.copiesInput.Text()); err == nil && copySelection.HasRange {
+		w.addLog("Copies range expanded to %d value(s) and randomized within Max cases=%s", len(copySelection.Values), w.maxCases.Text())
+	}
+	selected := make([]string, 0, len(axes))
+	for _, axis := range axes {
+		selected = append(selected, fmt.Sprintf("%s=%v", axis.Name, axis.Values))
+	}
 	if len(selected) == 0 {
-		if w.strategy == combinations.StrategySelected {
-			w.addLog("Selected %d combination(s) for strategy=%s; no job attributes selected, running import/lifecycle only", len(combos), w.strategy)
-			return
-		}
-		axes := defaultPermutationAxes(model)
-		for _, axis := range axes {
-			selected = append(selected, fmt.Sprintf("%s=%v", axis.Name, axis.Values))
-		}
-		w.addLog("Selected %d combination(s) for strategy=%s; no checkbox axes selected, using default discovered permutation axes", len(combos), w.strategy)
+		w.addLog("Selected %d combination(s) for strategy=%s; no job attributes selected, running import/lifecycle only", len(combos), w.strategy)
+		return
 	}
 	w.addLog("Selected %d combination(s) for strategy=%s; axes: %s", len(combos), w.strategy, strings.Join(selected, "; "))
 }
 func defaultPermutationAxes(model capabilities.Model) []combinations.Axis {
-	preferred := []string{"EFResolution", "EFColorMode", "EFMediaType", "EFPrintSpeed", "PageSize", "num copies", "EFBrightness", "EFPrintCover", "EFOutputBin"}
+	preferred := []string{"EFResolution", "EFColorMode", "EFMediaType", "EFPrintSpeed", "PageSize", "EFBrightness", "EFPrintCover", "EFOutputBin"}
 	axes := make([]combinations.Axis, 0, len(preferred))
 	seen := map[string]struct{}{}
 	for _, id := range preferred {
@@ -1461,6 +2202,9 @@ func defaultPermutationAxes(model capabilities.Model) []combinations.Axis {
 		return axes
 	}
 	for _, opt := range model.Options {
+		if isCopiesOption(opt.ID) {
+			continue
+		}
 		if _, ok := seen[opt.ID]; ok {
 			continue
 		}
@@ -1514,6 +2258,33 @@ func minInt(a, b int) int {
 	return b
 }
 
+func effectiveWorkerCount(requested int, plannedTests int64) int {
+	if requested < 1 {
+		requested = 1
+	}
+	requested = min(requested, maxWorkerCount)
+	if plannedTests > 0 && plannedTests < int64(requested) {
+		return int(plannedTests)
+	}
+	return requested
+}
+
+func parseWorkerCount(value string) int {
+	workers, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || workers < 1 {
+		return 1
+	}
+	return min(workers, maxWorkerCount)
+}
+
+func parseCaseLimit(value string) int {
+	limit, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || limit < 1 {
+		return defaultCaseLimit
+	}
+	return min(limit, maxCaseLimit)
+}
+
 func selectedValues(m map[string]*widget.Bool) []string {
 	var vals []string
 	for v, b := range m {
@@ -1524,11 +2295,38 @@ func selectedValues(m map[string]*widget.Bool) []string {
 	return vals
 }
 func combinationToAttributes(c combinations.Combination) map[string]string {
-	attrs := map[string]string{}
-	for k, v := range c {
-		attrs[k] = v
+	return cloneStringMap(c)
+}
+
+func cloneStringMap[M ~map[string]string](source M) map[string]string {
+	if len(source) == 0 {
+		return nil
 	}
-	return attrs
+	clone := make(map[string]string, len(source))
+	for key, value := range source {
+		clone[key] = value
+	}
+	return clone
+}
+
+func selectedReadbackValues(got, selected map[string]string) map[string]string {
+	if len(selected) == 0 {
+		return nil
+	}
+	values := make(map[string]string, len(selected))
+	for key := range selected {
+		values[key] = got[key]
+	}
+	return values
+}
+
+func jobNameFromAttributes(attributes map[string]string, fallbackName string) string {
+	for _, key := range []string{"job name", "name", "document name", "title"} {
+		if value := strings.TrimSpace(attributes[key]); value != "" {
+			return value
+		}
+	}
+	return fallbackName
 }
 func ensureBools(store map[string]map[string]*widget.Bool, id string, vals []string) {
 	if store[id] == nil {
@@ -1550,12 +2348,102 @@ func optionValues(opt capabilities.Option) []string {
 	return nil
 }
 
+func (w *Window) finishRun(status string) error {
+	completedAt := time.Now()
+	w.mu.Lock()
+	w.lastRun.Status = status
+	w.lastRun.CompletedAt = completedAt
+	store := w.resultStore
+	storeError := w.resultStoreError
+	w.mu.Unlock()
+	if store != nil {
+		if err := store.Close(); err != nil {
+			storeError = err.Error()
+			w.diagnostic.printf("RESULT_STORE: close error=%v", err)
+		}
+	}
+	if storeError != "" {
+		w.mu.Lock()
+		w.lastRun.Status = status + " with result-storage error"
+		w.resultStoreError = storeError
+		w.mu.Unlock()
+		return errors.New(storeError)
+	}
+	return nil
+}
+
+func (w *Window) closeResultStore() {
+	w.mu.Lock()
+	store := w.resultStore
+	w.mu.Unlock()
+	if store != nil {
+		if err := store.Close(); err != nil && w.diagnostic != nil {
+			w.diagnostic.printf("RESULT_STORE: shutdown close error=%v", err)
+		}
+	}
+}
+
+func (w *Window) startExcelExport() {
+	if w.running.Load() {
+		w.setStatus("Wait for the automation run to finish before exporting Excel results.")
+		return
+	}
+	if !w.exportingResults.CompareAndSwap(false, true) {
+		return
+	}
+	w.mu.Lock()
+	summary := w.lastRun
+	store := w.resultStore
+	storeError := w.resultStoreError
+	capabilityModel := w.capabilities
+	w.mu.Unlock()
+	if summary.StartedAt.IsZero() || store == nil || store.Path() == "" {
+		w.exportingResults.Store(false)
+		w.setStatus("Run automation before exporting Excel results.")
+		return
+	}
+	if storeError != "" {
+		w.exportingResults.Store(false)
+		w.setStatus("Excel export is unavailable because result storage failed: " + storeError)
+		return
+	}
+
+	defaultName := "api-automation-results-" + summary.StartedAt.Format("20060102-150405") + ".xlsx"
+	path, err := saveExcelPath(defaultName)
+	if err != nil {
+		w.exportingResults.Store(false)
+		w.setStatus("Excel export selection failed: " + err.Error())
+		return
+	}
+	if path == "" {
+		w.exportingResults.Store(false)
+		return
+	}
+	labels := make(map[string]string, len(capabilityModel.Options))
+	for _, option := range capabilityModel.Options {
+		labels[option.ID] = option.Label
+	}
+	resultsPath := store.Path()
+	w.setStatus("Exporting Excel test report...")
+	w.launchBackground("Excel export", func() {
+		defer w.exportingResults.Store(false)
+		stats, err := reportxlsx.Export(path, reportxlsx.Report{Summary: summary, ResultsPath: resultsPath, AttributeLabels: labels})
+		if err != nil {
+			w.setStatus("Excel export failed: " + err.Error())
+			w.addLog("Excel export failed: %v", err)
+			return
+		}
+		w.setStatus(fmt.Sprintf("Excel report saved: %s", path))
+		w.addLog("Excel report saved: %s (tests=%d pass=%d fail=%d errors=%d)", path, stats.Total, stats.Passed, stats.Failed, stats.Errors)
+	})
+}
+
 func (w *Window) setStatus(s string) {
 	w.mu.Lock()
 	w.status = s
 	w.mu.Unlock()
 	w.diagnostic.printf("STATUS: %s", s)
-	w.window.Invalidate()
+	w.invalidate()
 }
 
 func (w *Window) setServerTestStatus(s string) {
@@ -1563,22 +2451,42 @@ func (w *Window) setServerTestStatus(s string) {
 	w.serverTestStatus = s
 	w.mu.Unlock()
 	w.diagnostic.printf("SERVER_TEST: %s", s)
-	w.window.Invalidate()
+	w.invalidate()
 }
 
 func (w *Window) addLog(format string, args ...any) {
 	line := fmt.Sprintf(format, args...)
 	w.diagnostic.printf("UI: %s", line)
 	w.mu.Lock()
+	w.logCount++
 	w.log = append(w.log, time.Now().Format("15:04:05  ")+line)
+	if len(w.log) > maxRetainedLogLines+retainedEntryTrimBatch {
+		w.log = append([]string(nil), w.log[len(w.log)-maxRetainedLogLines:]...)
+	}
 	w.mu.Unlock()
-	w.window.Invalidate()
+	w.invalidate()
 }
-func (w *Window) addResult(file, method, status string, d time.Duration, detail string) {
+func (w *Window) addResult(result reportxlsx.Result) {
+	duration := time.Duration(result.DurationMS) * time.Millisecond
 	w.mu.Lock()
-	w.results = append(w.results, resultRow{File: filepath.Base(file), Method: method, Status: status, Duration: d.Round(time.Millisecond).String(), Detail: detail})
+	w.resultCount++
+	w.results = append(w.results, resultRow{JobID: result.JobID, JobName: result.JobName, Result: result.Result, Duration: duration.Round(time.Millisecond).String(), Detail: result.Detail})
+	if len(w.results) > maxRetainedResults+retainedEntryTrimBatch {
+		w.results = append([]resultRow(nil), w.results[len(w.results)-maxRetainedResults:]...)
+	}
+	store := w.resultStore
 	w.mu.Unlock()
-	w.addLog("%s %s %s", filepath.Base(file), status, detail)
+	if store == nil {
+		w.diagnostic.printf("RESULT_STORE: result was not persisted because the store is unavailable job=%s", result.JobID)
+	} else if err := store.Append(result); err != nil {
+		w.mu.Lock()
+		if w.resultStoreError == "" {
+			w.resultStoreError = err.Error()
+		}
+		w.mu.Unlock()
+		w.diagnostic.printf("RESULT_STORE: append error job=%s error=%v", result.JobID, err)
+	}
+	w.addLog("%s %s %s", result.JobName, result.Result, result.Detail)
 }
 
 func card(gtx layout.Context, child layout.Widget) layout.Dimensions {
@@ -1665,6 +2573,14 @@ func secondaryButton(th *material.Theme, b *widget.Clickable, text string) layou
 	}
 }
 
+func dangerButton(th *material.Theme, b *widget.Clickable, text string) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		btn := material.Button(th, b, text)
+		btn.Background = palette.danger
+		return btn.Layout(gtx)
+	}
+}
+
 func browseButton(th *material.Theme, b *widget.Clickable, text string) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		btn := material.Button(th, b, text)
@@ -1714,12 +2630,6 @@ func toggle(th *material.Theme, b *widget.Clickable, text string, active bool) l
 		return btn.Layout(gtx)
 	}
 }
-func navItem(th *material.Theme, text string) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, label(th, "› "+text, 15, rgb(0xe2e8f0)).Layout)
-	}
-}
-
 func navButton(th *material.Theme, b *widget.Clickable, text string, active bool) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {

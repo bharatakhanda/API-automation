@@ -74,7 +74,6 @@ func (l *diagnosticLog) printf(format string, args ...any) {
 		return
 	}
 	_, _ = fmt.Fprintf(l.file, "%s  %s\n", time.Now().Format(time.RFC3339), fmt.Sprintf(format, args...))
-	_ = l.file.Sync()
 }
 
 func (l *diagnosticLog) close() {
@@ -87,7 +86,9 @@ func (l *diagnosticLog) close() {
 		return
 	}
 	_, _ = fmt.Fprintf(l.file, "%s  Application exiting\n", time.Now().Format(time.RFC3339))
-	_ = l.file.Sync()
+	// Do not force a full-file Sync during GUI shutdown. Diagnostic writes are
+	// unbuffered, and syncing a large long-run log can keep the Windows process
+	// alive after its window has closed.
 	_ = l.file.Close()
 	l.closed = true
 }
