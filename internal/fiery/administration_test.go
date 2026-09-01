@@ -1,0 +1,149 @@
+package fiery
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestServerPresetDiscoveryAndApplicationAreReadOnly(t *testing.T) {
+	var applied bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == apiV5+"/presets":
+			_, _ = w.Write([]byte(`{"data":{"items":[{"id":"P-2","name":"Proof","attributes":{"EFColorMode":"CMYK"}},{"id":"P-1","name":"Archive"}]}}`))
+		case r.Method == http.MethodPut && r.URL.Path == apiV5+"/jobs/JOB-1":
+			if r.URL.Query().Get("preset") != "P-2" {
+				t.Fatalf("preset query = %q", r.URL.Query().Get("preset"))
+			}
+			var payload map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload["preset"] != "P-2" {
+				t.Fatalf("preset payload = %#v", payload)
+			}
+			applied = true
+			_, _ = w.Write([]byte(`{"data":{"item":{"preset":true}}}`))
+		default:
+			t.Fatalf("unexpected preset request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+	client, err := New(Config{ServerIP: server.URL, SecretKey: "secret", Password: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := Session{Cookie: "session=abc"}
+	presets, err := client.ListServerPresets(context.Background(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(presets) != 2 || presets[0].ID != "P-1" || presets[1].Attributes["EFColorMode"] != "CMYK" {
+		t.Fatalf("presets = %#v", presets)
+	}
+	if err := client.ApplyServerPreset(context.Background(), session, "JOB-1", "P-2"); err != nil {
+		t.Fatal(err)
+	}
+	if !applied {
+		t.Fatal("server preset was not applied")
+	}
+}
+
+func TestServerAdministrationUsesOnlyDocumentedV5Operations(t *testing.T) {
+	seen := map[string]bool{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == apiV5+"/jobs":
+			seen["jobs"] = true
+			_, _ = w.Write([]byte(`{"data":{"items":[{"id":"1","title":"A","username":"u","status":"held","state":"spooled"},{"id":"2","title":"B"}]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == apiV5+"/server/reboot":
+			seen["reboot"] = true
+			_, _ = w.Write([]byte(`{"status":true}`))
+		case r.Method == http.MethodPost && r.URL.Path == apiV5+"/server" && r.URL.Query().Get("method") == "restart":
+			seen["restart"] = true
+			_, _ = w.Write([]byte(`{"restart":true}`))
+		case r.Method == http.MethodPost && r.URL.Path == apiV5+"/server" && r.URL.Query().Get("method") == "clear":
+			if r.URL.Query().Get("services") != "jobs" || r.URL.Query().Get("status") != "" {
+				t.Fatalf("unsafe clear query: %s", r.URL.RawQuery)
+			}
+			seen["clear"] = true
+			_, _ = w.Write([]byte(`{"clear":true}`))
+		case r.Method == http.MethodGet && r.URL.Path == apiV5+"/server/status":
+			seen["status"] = true
+			_, _ = w.Write([]byte(`{"data":{"item":{"fiery":"running"}}}`))
+		default:
+			t.Fatalf("unexpected administration request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+	client, err := New(Config{ServerIP: server.URL, SecretKey: "secret", Password: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := Session{Cookie: "session=abc"}
+	jobs, err := client.ListJobs(context.Background(), session)
+	if err != nil || len(jobs) != 2 || jobs[0].Name != "A" {
+		t.Fatalf("jobs=%#v err=%v", jobs, err)
+	}
+	if err := client.RestartFieryProcess(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.RebootServer(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ClearAllJobs(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	status, err := client.ServerStatus(context.Background(), session)
+	if err != nil || status != "running" {
+		t.Fatalf("status=%q err=%v", status, err)
+	}
+	for _, operation := range []string{"jobs", "restart", "reboot", "clear", "status"} {
+		if !seen[operation] {
+			t.Fatalf("operation %q was not called: %#v", operation, seen)
+		}
+	}
+}
+
+func TestListJobsNeverTreatsMalformedOrPartialSuccessAsEmptyInventory(t *testing.T) {
+	response := `{"data":{"unexpected":[]}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(response))
+	}))
+	defer server.Close()
+	client, err := New(Config{ServerIP: server.URL, SecretKey: "secret", Password: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jobs, err := client.ListJobs(context.Background(), Session{}); err == nil || jobs != nil {
+		t.Fatalf("malformed inventory was treated as empty: jobs=%#v err=%v", jobs, err)
+	}
+	response = `{"data":{"totalItems":2,"items":[{"id":"1"}]}}`
+	if jobs, err := client.ListJobs(context.Background(), Session{}); err == nil || jobs != nil {
+		t.Fatalf("partial inventory was accepted: jobs=%#v err=%v", jobs, err)
+	}
+}
+
+func TestServerAdministrationRejectsExplicitFalseAcknowledgement(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"item":{"clear":false}}}`))
+	}))
+	defer server.Close()
+	client, err := New(Config{ServerIP: server.URL, SecretKey: "secret", Password: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ClearAllJobs(context.Background(), Session{}); err == nil {
+		t.Fatal("explicit clear=false unexpectedly succeeded")
+	}
+}
+
+func TestParseServerPresetsRejectsMissingAndDuplicateIDs(t *testing.T) {
+	presets := ParseServerPresets([]byte(`{"data":{"items":[{"id":"A","name":"One"},{"id":"A","name":"Duplicate"},{"name":"Missing"}]}}`))
+	if len(presets) != 1 || presets[0].ID != "A" || presets[0].Name != "One" {
+		t.Fatalf("presets = %#v", presets)
+	}
+}

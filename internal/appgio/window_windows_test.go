@@ -11,6 +11,7 @@ import (
 
 	"api-automation/internal/capabilities"
 	"api-automation/internal/combinations"
+	"api-automation/internal/fiery"
 	"api-automation/internal/presets"
 
 	"gioui.org/widget"
@@ -52,9 +53,12 @@ func TestRunModesHaveExpectedLifecycle(t *testing.T) {
 	}
 }
 
-func TestWorkspaceSeparatesResultsAndActivityLogs(t *testing.T) {
-	if len(workspacePages) != 4 {
-		t.Fatalf("workspace page count = %d, want 4", len(workspacePages))
+func TestWorkspaceSeparatesAdministrationResultsAndActivityLogs(t *testing.T) {
+	if len(workspacePages) != 5 {
+		t.Fatalf("workspace page count = %d, want 5", len(workspacePages))
+	}
+	if workspacePages[pageAdministration].NavigationLabel != "Administration" || pageAdministration == pageResults {
+		t.Fatalf("administration page is not separate: %#v", workspacePages[pageAdministration])
 	}
 	if workspacePages[pageResults].NavigationLabel != "Results" {
 		t.Fatalf("results page = %#v", workspacePages[pageResults])
@@ -68,6 +72,39 @@ func TestWorkspaceSeparatesResultsAndActivityLogs(t *testing.T) {
 	window.setActivePage(pageLogs)
 	if window.activePage != pageLogs || window.list.Position.Offset != 0 {
 		t.Fatalf("page switch did not reset scrolling: page=%d position=%#v", window.activePage, window.list.Position)
+	}
+}
+
+func TestServerAdministrationIsBlockedByConcurrentOperations(t *testing.T) {
+	window := &Window{}
+	if err := window.serverAdministrationPrecondition(); err != nil {
+		t.Fatalf("idle administration was blocked: %v", err)
+	}
+	for name, set := range map[string]func(){
+		"automation":      func() { window.running.Store(true) },
+		"job action":      func() { window.managingJob.Store(true) },
+		"connection test": func() { window.testingServer.Store(true) },
+	} {
+		window.running.Store(false)
+		window.managingJob.Store(false)
+		window.testingServer.Store(false)
+		set()
+		if err := window.serverAdministrationPrecondition(); err == nil {
+			t.Fatalf("%s did not block server administration", name)
+		}
+	}
+}
+
+func TestSelectedServerPresetMustStillBeAdvertised(t *testing.T) {
+	window := &Window{capabilities: capabilities.Model{ServerPresets: []fiery.ServerPreset{{ID: "P-1", Name: "Production"}}}}
+	window.serverPresetGroup.Value = "P-1"
+	preset, err := window.selectedServerPreset(window.capabilities)
+	if err != nil || preset == nil || preset.ID != "P-1" {
+		t.Fatalf("preset=%#v err=%v", preset, err)
+	}
+	window.serverPresetGroup.Value = "STALE"
+	if _, err := window.selectedServerPreset(window.capabilities); err == nil {
+		t.Fatal("stale server preset unexpectedly accepted")
 	}
 }
 
@@ -142,6 +179,8 @@ func TestResetSelectionsRestoresAutomationDefaults(t *testing.T) {
 	window.maxCases.SetText("999")
 	window.fileModeGroup.Value = "single"
 	window.jobActionID.SetText("JOB-123")
+	window.adminConfirmation.SetText(clearAllJobsConfirmation)
+	window.serverPresetGroup.Value = "SERVER-PRESET-1"
 	window.resetSelections()
 	if window.selected["EFResolution"]["360x720dpi"].Value || window.groupChecks["Print"].Value || window.optionChecks["EFResolution"].Value {
 		t.Fatal("checkbox selections were not cleared")
@@ -151,6 +190,9 @@ func TestResetSelectionsRestoresAutomationDefaults(t *testing.T) {
 	}
 	if window.fileModeGroup.Value != "all" || !window.modeChecks[0].Value || window.modeChecks[1].Value || window.jobActionID.Text() != "" {
 		t.Fatal("file mode, run modes, or job ID were not reset")
+	}
+	if window.serverPresetGroup.Value != noServerPresetID || window.adminConfirmation.Text() != "" {
+		t.Fatal("server preset or destructive confirmation was not reset")
 	}
 }
 
@@ -175,14 +217,14 @@ func TestLoadPresetRestoresSafeSettingsAndPreservesCredentials(t *testing.T) {
 	window := &Window{
 		selected: map[string]map[string]*widget.Bool{}, numericInputs: map[string]*widget.Editor{},
 		groupChecks: map[string]*widget.Bool{}, optionChecks: map[string]*widget.Bool{},
-		capabilities: capabilities.Model{SerialNumber: "SERVER-1", Options: []capabilities.Option{
+		capabilities: capabilities.Model{SerialNumber: "SERVER-1", ServerPresets: []fiery.ServerPreset{{ID: "SERVER-PRESET-1", Name: "Press Ready"}}, Options: []capabilities.Option{
 			{ID: "EFColorMode", Values: []string{"CMYK", "Grayscale"}},
 			{ID: "num copies", Range: &capabilities.NumericRange{Min: 1, Max: 9999, Increment: 1}},
 			{ID: "Scaling", Range: &capabilities.NumericRange{Min: 25, Max: 400, Increment: 1}},
 			{ID: pageRangeOptionID, Values: []string{"All", "Odd", "Even", pageRangeCustomServerValue}},
 		}},
 		presetList: []presets.Preset{{
-			Name: "Production", ServerSerial: "SERVER-1",
+			Name: "Production", ServerSerial: "SERVER-1", ServerPresetID: "SERVER-PRESET-1",
 			SelectedValues: map[string][]string{"EFColorMode": {"CMYK"}},
 			NumericInputs:  map[string]string{"num copies": "5-7", "Scaling": "100", pageRangeDataID: "1,3-5"},
 			Strategy:       "pairwise", MaxCases: "250", ParallelJobs: "8", RunModes: []string{"Process and Hold"}, FileMode: "random",
@@ -199,6 +241,9 @@ func TestLoadPresetRestoresSafeSettingsAndPreservesCredentials(t *testing.T) {
 	}
 	if window.strategy != combinations.StrategyPairwise || window.maxCases.Text() != "250" || window.workers.Text() != "8" || window.fileModeGroup.Value != "random" || !window.modeChecks[1].Value {
 		t.Fatal("preset execution controls were not restored")
+	}
+	if window.serverPresetGroup.Value != "SERVER-PRESET-1" {
+		t.Fatalf("server preset selection = %q", window.serverPresetGroup.Value)
 	}
 	if window.serverIP.Text() != "server.example" || window.secretKey.Text() != "secret-not-saved-in-preset" || window.password.Text() != "password-not-saved-in-preset" {
 		t.Fatal("loading a preset changed connection credentials")

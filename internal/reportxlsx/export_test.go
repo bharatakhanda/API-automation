@@ -68,8 +68,8 @@ func TestExportCreatesSummaryAndDynamicSetGetColumns(t *testing.T) {
 		t.Fatalf("sheet list = %#v", got)
 	}
 	assertCell(t, workbook, "Summary", "A1", "Fiery API Automation Test Report")
-	assertCell(t, workbook, "Summary", "A22", "Executed tests")
-	assertCell(t, workbook, "Summary", "B22", "2")
+	assertCell(t, workbook, "Summary", "A23", "Executed tests")
+	assertCell(t, workbook, "Summary", "B23", "2")
 	assertCell(t, workbook, "Results", "A1", "Job ID")
 	assertCell(t, workbook, "Results", "B1", "Job Name")
 	assertCell(t, workbook, "Results", "C1", "Result")

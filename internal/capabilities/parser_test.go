@@ -35,6 +35,17 @@ func TestFromSnapshotExtractsServerQueuesAndOptions(t *testing.T) {
 	}
 }
 
+func TestFromSnapshotPopulatesReadOnlyServerPresets(t *testing.T) {
+	snapshot := fiery.CapabilitySnapshot{Endpoints: []fiery.EndpointSnapshot{{
+		Name: "v5_presets",
+		Body: raw(`{"data":{"items":[{"id":"PRESET-1","name":"Production","attributes":{"EFColorMode":"CMYK"}}]}}`),
+	}}}
+	model := FromSnapshot(snapshot)
+	if len(model.ServerPresets) != 1 || model.ServerPresets[0].ID != "PRESET-1" || model.ServerPresets[0].Attributes["EFColorMode"] != "CMYK" {
+		t.Fatalf("server presets = %#v", model.ServerPresets)
+	}
+}
+
 func TestFromSnapshotKeepsExistingInfoWhenLaterResponseIsPartial(t *testing.T) {
 	snapshot := fiery.CapabilitySnapshot{Endpoints: []fiery.EndpointSnapshot{
 		{Name: "v5_info", Body: raw(`{"data":{"item":{"name":"SERVER-85","serial_number":"P00014754","version":"1.4"}}}`)},
@@ -119,7 +130,7 @@ func TestCategorySearchAndExplicitConstraintValidation(t *testing.T) {
 		{ID: "EFMediaThickness", Label: "Media thickness", Group: "fppapersource", Range: &NumericRange{Min: 1, Max: 50, Increment: 1}},
 	}}
 	groups := FilteredGroups(model, "thickness")
-	if len(groups) != 1 || groups[0].Name != "Substrate" || len(groups[0].Options) != 1 {
+	if len(groups) != 1 || groups[0].Name != "Substrate / Media" || len(groups[0].Options) != 1 {
 		t.Fatalf("filtered groups = %#v", groups)
 	}
 	valid := map[string]string{"EFResolution": "360x720dpi", "EFEdgeDropSize": "0_1_2_2_2"}
@@ -132,6 +143,38 @@ func TestCategorySearchAndExplicitConstraintValidation(t *testing.T) {
 	}
 	if !NeedsConstraintCheck(model, map[string]string{"EFResolution": "360x720dpi"}) || NeedsConstraintCheck(model, map[string]string{"Unrelated": "x"}) {
 		t.Fatal("constraint-check requirement detection is incorrect")
+	}
+}
+
+func TestGroupedOptionsUsesPDFHeadingsNestedSectionsAndOrder(t *testing.T) {
+	model := Model{Options: []Option{
+		{ID: "EFResolution", Label: "Resolution", Group: "fpimage"},
+		{ID: "EFEdgeDropSize", Label: "Edge", Group: "fpimage"},
+		{ID: "EFColorMode", Label: "Color", Group: "fpcolorwise"},
+		{ID: "EFRGBOverride", Label: "RGB", Group: "fpcolorwise"},
+		{ID: "EFPrintDieLine", Label: "Die", Group: "fpjobinfo"},
+		{ID: "Instruct", Label: "Instructions", Group: "fpjobinfo"},
+	}}
+	groups := GroupedOptions(model)
+	if names := CategoryNames(model); len(names) != 3 || names[0] != "Job Info" || names[1] != "Color" || names[2] != "Image" {
+		t.Fatalf("PDF category order = %v", names)
+	}
+	for _, name := range CategoryNames(model) {
+		if name == "Quick Access" || name == "Color and Image" {
+			t.Fatalf("obsolete category remained: %q", name)
+		}
+	}
+	job := groups[0]
+	if len(job.Sections) != 2 || job.Sections[0].Name != "Job notes" || job.Sections[1].Name != "Die printing" {
+		t.Fatalf("job sections = %#v", job.Sections)
+	}
+	color := groups[1]
+	if len(color.Sections) != 2 || color.Sections[0].Name != "" || color.Sections[1].Name != "Color input" {
+		t.Fatalf("color sections = %#v", color.Sections)
+	}
+	image := groups[2]
+	if len(image.Sections) != 2 || image.Sections[0].Name != "" || image.Sections[1].Name != "Edge enhancement" {
+		t.Fatalf("image sections = %#v", image.Sections)
 	}
 }
 

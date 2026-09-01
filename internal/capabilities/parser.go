@@ -57,6 +57,8 @@ func FromSnapshot(snapshot fiery.CapabilitySnapshot) Model {
 			applyInfo(&model, endpoint.Body)
 		case "queues", "v5_queues":
 			model.Queues = parseQueues(endpoint.Body)
+		case "presets", "v5_presets":
+			model.ServerPresets = fiery.ParseServerPresets(endpoint.Body)
 		case "properties", "v5_properties", "v4_properties":
 			options := parseProperties(endpoint.Body)
 			if len(options) > len(model.Options) {

@@ -18,6 +18,7 @@ var v5DiscoveryEndpoints = []DiscoveryEndpoint{
 	{Name: "v5_properties", Method: http.MethodGet, Path: apiV5 + "/properties"},
 	{Name: "v5_jobs", Method: http.MethodGet, Path: apiV5 + "/jobs"},
 	{Name: "v5_queues", Method: http.MethodGet, Path: apiV5 + "/queues"},
+	{Name: "v5_presets", Method: http.MethodGet, Path: apiV5 + "/presets"},
 	{Name: "v5_printers", Method: http.MethodGet, Path: apiV5 + "/printers"},
 	{Name: "v5_device", Method: http.MethodGet, Path: apiV5 + "/device"},
 	{Name: "v5_server", Method: http.MethodGet, Path: apiV5 + "/server"},

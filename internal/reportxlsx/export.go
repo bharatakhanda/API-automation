@@ -240,6 +240,7 @@ func writeSummarySheet(workbook *excelize.File, summary Summary, stats Stats, st
 		{"Combined test duration", formatDuration(time.Duration(stats.TotalDurationMS) * time.Millisecond)},
 		{"Test files selected", summary.TestFileCount},
 		{"Generated combinations", summary.CombinationCount},
+		{"Fiery server preset", fallback(summary.ServerPreset, "None")},
 		{"Run modes", strings.Join(summary.RunModes, ", ")},
 		{"Combination strategy", fallback(summary.Strategy, "Unknown")},
 		{"Parallel workers", summary.Workers},

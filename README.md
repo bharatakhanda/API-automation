@@ -11,14 +11,16 @@ Windows desktop automation for Fiery job import, lifecycle execution, attribute 
 - Uses configurable worker concurrency from 1 through 1000, cancellation, condition-based polling, and final set/get verification.
 - Saves diagnostics and API/capability snapshots beside the executable under `logs/` and `captures/`.
 - Provides visible vertical scrolling for long workspace pages and exports completed runs to formatted `.xlsx` workbooks with Summary and Results sheets.
-- Organizes discovered features into Job info, Layout, Substrate, Color and Image, Finishing, VDP, Installable, and Advanced tabs instead of rendering one full capability catalog at once.
+- Organizes discovered features into PDF-aligned Job Info, Substrate/Media, Layout, Color, Image, Finishing, and VDP tabs, followed by installable/fallback tabs when needed. Capabilities are vertically stacked under Fiery-style nested headings; Quick Access is intentionally excluded.
 - Provides feature search plus header Reset and category/capability-level Select all controls for discovered checkbox values.
 - Renders Fiery `efirange` properties as validated numeric inputs using server min/max/increment/precision metadata, provides optional Scale input, and accepts single values, comma-separated values, or inclusive ranges.
 - Accepts Copies as individual values or inclusive ranges from 1 through 9999 and feeds them into selected, permutation, and pairwise generation while respecting Max cases.
 - Renders Fiery `EFPageRange=Range1` as a custom page-range text field instead of a checkbox. Inputs such as `1,3,5-8` are normalized and validated against each imported file's original page count before the job update.
 - Saves reusable local settings presets without credentials or file paths and validates restored values against the currently connected Fiery.
+- Discovers Fiery server presets read-only through API v5, displays their IDs/advertised setting counts, and applies one selected preset to each imported job before explicit capability overrides. The application cannot create, edit, or delete server presets.
 - Filters explicit local conflicts using discovered constraint metadata and performs a cached, job-specific Fiery constraint check before applying constrained settings when the endpoint is supported.
 - Provides confirmed manual job actions plus separate Cancel-while-Processing/Ripping, Cancel-while-Waiting-to-Print, Cancel-while-Printing, and Delete automation modes; each selected mode imports its own job.
+- Provides a separate Administration workspace for confirmed Fiery-process restart, full-server reboot, and guarded clear-all-jobs. Clearing requires a fresh job inventory, an exact typed phrase, a native confirmation containing server/count, immediate count revalidation, and verified empty readback; only the jobs service is requested.
 - Evaluates Process-and-Hold/RIP success from final Fiery status, state, error, and raster/page evidence in addition to strict set/get matching; lifecycle failures remain failures even when ticket values match.
 - Coordinates GUI shutdown with background cancellation and bounded waiting, and finalizes long-run result files without a blocking full-file sync.
 - Keeps all normal GUI HTTP work in-process; the standalone readback probe alone may invoke curl for diagnostics.

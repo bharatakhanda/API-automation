@@ -49,6 +49,7 @@ type Summary struct {
 	PlannedTests      int64
 	Workers           int
 	Strategy          string
+	ServerPreset      string
 	RunModes          []string
 }
 

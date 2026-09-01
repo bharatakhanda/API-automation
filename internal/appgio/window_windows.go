@@ -51,6 +51,7 @@ const (
 	pageRangeDataID            = "DPP_PAGE_RANGE"
 	pageRangeCustomServerValue = "Range1"
 	pageRangeInternalPrefix    = "__API_AUTOMATION_CUSTOM_PAGE_RANGE__:"
+	noServerPresetID           = "__API_AUTOMATION_NO_SERVER_PRESET__"
 
 	defaultCaseLimit       = 100
 	maxCaseLimit           = 10_000
@@ -65,6 +66,7 @@ const (
 const (
 	pageSettings = iota
 	pageCapabilities
+	pageAdministration
 	pageResults
 	pageLogs
 )
@@ -97,19 +99,23 @@ type Window struct {
 	copiesInput, pageRangeInput   widget.Editor
 	jobActionID                   widget.Editor
 	capabilitySearch, presetName  widget.Editor
+	adminConfirmation             widget.Editor
 
 	captureButton, runButton, cancelButton, resetButton    widget.Clickable
 	testServerButton, apiTraceButton, exportButton         widget.Clickable
 	cancelJobButton, deleteJobButton                       widget.Clickable
 	savePresetButton, loadPresetButton, deletePresetButton widget.Clickable
+	inspectJobsButton, restartServerButton                 widget.Clickable
+	rebootServerButton, clearAllJobsButton                 widget.Clickable
 	browseFolderButton, browseFileButton                   widget.Clickable
 	navButtons                                             []widget.Clickable
 	selectedOnlyButton, allPermButton, pairwiseButton      widget.Clickable
 	modeChecks                                             []widget.Bool
 	fileModeGroup                                          widget.Enum
 
-	activePage int
-	strategy   combinations.Strategy
+	activePage        int
+	strategy          combinations.Strategy
+	serverPresetGroup widget.Enum
 
 	capabilities          capabilities.Model
 	selected              map[string]map[string]*widget.Bool
@@ -141,11 +147,17 @@ type Window struct {
 	testingServer         atomic.Bool
 	exportingResults      atomic.Bool
 	managingJob           atomic.Bool
+	managingServer        atomic.Bool
+	inspectingJobs        atomic.Bool
 	cancel                context.CancelFunc
 	diagnostic            *diagnosticLog
 	resultStore           *reportxlsx.ResultStore
 	resultStoreError      string
 	lastRun               reportxlsx.Summary
+	adminStatus           string
+	adminInventoryServer  string
+	adminInventoryAt      time.Time
+	adminJobCount         int
 }
 
 type resultRow struct{ JobID, JobName, Result, Duration, Status, State, Detail string }
@@ -159,6 +171,7 @@ type workspacePage struct {
 var workspacePages = []workspacePage{
 	{NavigationLabel: "Settings", Title: "Settings", Subtitle: "Configure server connection, test files, and Fiery run mode."},
 	{NavigationLabel: "Capabilities", Title: "Capabilities", Subtitle: "Discover Fiery capabilities and choose job options for automation."},
+	{NavigationLabel: "Administration", Title: "Server administration", Subtitle: "Perform explicitly confirmed Fiery process and job-maintenance actions."},
 	{NavigationLabel: "Results", Title: "Results", Subtitle: "Review automation outcomes, verification status, and execution details."},
 	{NavigationLabel: "Activity logs", Title: "Activity logs", Subtitle: "Review live operational messages and diagnostic-log location."},
 }
@@ -170,20 +183,22 @@ type apiTraceStage struct {
 }
 
 type apiTraceReport struct {
-	CapturedAt     string             `json:"capturedAt"`
-	Server         string             `json:"server"`
-	File           string             `json:"file"`
-	Mode           string             `json:"mode"`
-	JobID          string             `json:"jobId,omitempty"`
-	Attributes     map[string]string  `json:"attributes"`
-	UpdateProtocol string             `json:"updateProtocol"`
-	SessionLogin   string             `json:"sessionLogin,omitempty"`
-	Import         fiery.ImportResult `json:"import"`
-	Stages         []apiTraceStage    `json:"stages"`
-	Final          map[string]string  `json:"finalAttributes,omitempty"`
-	Lifecycle      string             `json:"lifecycle,omitempty"`
-	Result         string             `json:"result"`
-	Error          string             `json:"error,omitempty"`
+	CapturedAt       string             `json:"capturedAt"`
+	Server           string             `json:"server"`
+	File             string             `json:"file"`
+	Mode             string             `json:"mode"`
+	ServerPresetID   string             `json:"serverPresetId,omitempty"`
+	ServerPresetName string             `json:"serverPresetName,omitempty"`
+	JobID            string             `json:"jobId,omitempty"`
+	Attributes       map[string]string  `json:"attributes"`
+	UpdateProtocol   string             `json:"updateProtocol"`
+	SessionLogin     string             `json:"sessionLogin,omitempty"`
+	Import           fiery.ImportResult `json:"import"`
+	Stages           []apiTraceStage    `json:"stages"`
+	Final            map[string]string  `json:"finalAttributes,omitempty"`
+	Lifecycle        string             `json:"lifecycle,omitempty"`
+	Result           string             `json:"result"`
+	Error            string             `json:"error,omitempty"`
 }
 
 type runMode struct {
@@ -217,7 +232,7 @@ func New() *Window {
 		window: new(app.Window), theme: material.NewTheme(),
 		selected: map[string]map[string]*widget.Bool{}, groupChecks: map[string]*widget.Bool{}, optionChecks: map[string]*widget.Bool{},
 		numericInputs: map[string]*widget.Editor{}, categoryButtons: map[string]*widget.Clickable{},
-		strategy: combinations.StrategySelected, activeCapabilityGroup: "Job info",
+		strategy: combinations.StrategySelected, activeCapabilityGroup: "Job Info",
 		status: "Ready · Open Settings, discover capabilities, then run automation.", diagnostic: newDiagnosticLog(),
 		appContext: appContext, appCancel: appCancel,
 	}
@@ -238,6 +253,7 @@ func New() *Window {
 	initEditor(&w.jobActionID, "")
 	initEditor(&w.capabilitySearch, "")
 	initEditor(&w.presetName, "")
+	initEditor(&w.adminConfirmation, "")
 	if presetPath, err := presets.DefaultPath(); err == nil {
 		if store, storeErr := presets.New(presetPath); storeErr == nil {
 			w.presetStore = store
@@ -245,11 +261,13 @@ func New() *Window {
 		}
 	}
 	w.fileModeGroup.Value = "all"
+	w.serverPresetGroup.Value = noServerPresetID
 	w.modeChecks = make([]widget.Bool, len(runModes))
 	if len(w.modeChecks) > 0 {
 		w.modeChecks[0].Value = true
 	}
 	w.serverTestStatus = "Not tested"
+	w.adminStatus = "No administrative action is in progress."
 	w.window.Option(app.Title("API Automation"), app.Size(unit.Dp(1240), unit.Dp(900)), app.MinSize(unit.Dp(1100), unit.Dp(760)))
 	return w
 }
@@ -392,6 +410,18 @@ func (w *Window) handleClicks(gtx layout.Context) {
 	for w.deletePresetButton.Clicked(gtx) {
 		w.deleteNamedPreset()
 	}
+	for w.inspectJobsButton.Clicked(gtx) {
+		w.inspectServerJobs()
+	}
+	for w.restartServerButton.Clicked(gtx) {
+		w.startServerControl("restart")
+	}
+	for w.rebootServerButton.Clicked(gtx) {
+		w.startServerControl("reboot")
+	}
+	for w.clearAllJobsButton.Clicked(gtx) {
+		w.startClearAllJobs()
+	}
 	for name, button := range w.categoryButtons {
 		for button.Clicked(gtx) {
 			w.activeCapabilityGroup = name
@@ -450,7 +480,7 @@ func (w *Window) handleClicks(gtx layout.Context) {
 }
 
 func (w *Window) resetSelections() {
-	if w.running.Load() {
+	if w.running.Load() || w.managingServer.Load() || w.inspectingJobs.Load() {
 		w.setStatus("Wait for the active operation to finish before resetting selections.")
 		return
 	}
@@ -472,14 +502,21 @@ func (w *Window) resetSelections() {
 		input.SetText("")
 	}
 	w.capabilitySearch.SetText("")
-	w.activeCapabilityGroup = "Job info"
+	w.activeCapabilityGroup = "Job Info"
 	w.workers.SetText("1")
 	w.maxCases.SetText(strconv.Itoa(defaultCaseLimit))
 	w.fileModeGroup.Value = "all"
+	w.serverPresetGroup.Value = noServerPresetID
 	for index := range w.modeChecks {
 		w.modeChecks[index].Value = index == 0
 	}
 	w.jobActionID.SetText("")
+	w.adminConfirmation.SetText("")
+	w.mu.Lock()
+	w.adminInventoryServer = ""
+	w.adminInventoryAt = time.Time{}
+	w.adminJobCount = 0
+	w.mu.Unlock()
 	w.setStatus("Selections reset to defaults. Server details, discovered capabilities, and file paths were preserved.")
 	w.addLog("Reset capability selections, Copies, custom page range, strategy, run modes, parallel jobs, and case limit to defaults")
 }
@@ -535,6 +572,8 @@ func (w *Window) content(gtx layout.Context) layout.Dimensions {
 	switch w.activePage {
 	case pageCapabilities:
 		children = append(children, layout.Rigid(w.capabilitiesCard))
+	case pageAdministration:
+		children = append(children, layout.Rigid(w.administrationCard))
 	case pageResults:
 		children = append(children, layout.Rigid(w.resultsCard))
 	case pageLogs:
@@ -686,7 +725,7 @@ func (w *Window) capabilitiesCard(gtx layout.Context) layout.Dimensions {
 	active := w.captureActive
 	w.mu.Unlock()
 	return card(gtx, func(gtx layout.Context) layout.Dimensions {
-		if len(model.Options) == 0 && len(model.Queues) == 0 {
+		if len(model.Options) == 0 && len(model.Queues) == 0 && len(model.ServerPresets) == 0 {
 			children := []layout.FlexChild{layout.Rigid(sectionTitle(w.theme, "Server capabilities")), layout.Rigid(spacer(10))}
 			if active {
 				children = append(children, layout.Rigid(w.captureProgressPanel), layout.Rigid(spacer(10)))
@@ -702,6 +741,7 @@ func (w *Window) capabilitiesCard(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(w.capabilityToolbar), layout.Rigid(spacer(10)),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.categoryTabs(gtx, model) }), layout.Rigid(spacer(10)),
 			layout.Rigid(w.presetPanel), layout.Rigid(spacer(10)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.serverPresetPanel(gtx, model) }), layout.Rigid(spacer(10)),
 			layout.Rigid(w.strategySelector), layout.Rigid(spacer(12)),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionGrid(gtx, model) }),
 		)
@@ -757,14 +797,27 @@ func (w *Window) categoryTabs(gtx layout.Context, model capabilities.Model) layo
 	if !available {
 		w.activeCapabilityGroup = names[0]
 	}
-	children := make([]layout.FlexChild, 0, len(names))
-	for _, name := range names {
-		name := name
-		button := w.categoryButton(name)
-		shortName := strings.TrimSuffix(strings.TrimSuffix(name, " options"), " / Advanced")
-		children = append(children, layout.Flexed(1, toggle(w.theme, button, shortName, w.activeCapabilityGroup == name)))
+	// Color and Image are separate PDF-defined headings. Two bounded rows keep
+	// every category readable without horizontal scrolling or clipped labels.
+	const tabsPerRow = 5
+	rows := make([]layout.FlexChild, 0, (len(names)+tabsPerRow-1)/tabsPerRow)
+	for start := 0; start < len(names); start += tabsPerRow {
+		end := minInt(start+tabsPerRow, len(names))
+		rowNames := append([]string(nil), names[start:end]...)
+		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			children := make([]layout.FlexChild, 0, len(rowNames))
+			for _, categoryName := range rowNames {
+				name := categoryName
+				button := w.categoryButton(name)
+				shortName := strings.TrimSuffix(strings.TrimSuffix(name, " options"), " / Advanced")
+				children = append(children, layout.Flexed(1, toggle(w.theme, button, shortName, w.activeCapabilityGroup == name)))
+			}
+			return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
+			})
+		}))
 	}
-	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 }
 
 func (w *Window) categoryButton(name string) *widget.Clickable {
@@ -824,7 +877,7 @@ func (w *Window) optionGrid(gtx layout.Context, model capabilities.Model) layout
 		return formPanel(gtx, label(w.theme, "No features match the current search.", 14, palette.muted).Layout)
 	}
 	children := make([]layout.FlexChild, 0, len(groups)*2+1)
-	if query == "" && w.activeCapabilityGroup == "Job info" {
+	if query == "" && w.activeCapabilityGroup == "Job Info" {
 		children = append(children, layout.Rigid(w.queueGroup(model)), layout.Rigid(spacer(12)))
 	}
 	for index, group := range groups {
@@ -865,9 +918,21 @@ func (w *Window) capabilityGroup(gtx layout.Context, group capabilities.OptionGr
 	children := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 		return w.capabilityGroupHeader(gtx, group)
 	}), layout.Rigid(spacer(8))}
-	for _, opt := range group.Options {
-		option := opt
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionRow(gtx, option) }), layout.Rigid(spacer(8)))
+	for sectionIndex, section := range group.Sections {
+		if section.Name != "" {
+			if sectionIndex > 0 {
+				children = append(children, layout.Rigid(spacer(10)))
+			}
+			sectionName := section.Name
+			children = append(children,
+				layout.Rigid(label(w.theme, sectionName, 16, palette.primary).Layout),
+				layout.Rigid(spacer(7)),
+			)
+		}
+		for _, opt := range section.Options {
+			option := opt
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionRow(gtx, option) }), layout.Rigid(spacer(8)))
+		}
 	}
 	return formPanel(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
@@ -1228,6 +1293,10 @@ func (w *Window) logPanel(gtx layout.Context) layout.Dimensions {
 }
 
 func (w *Window) testServerConnection() {
+	if w.managingServer.Load() || w.inspectingJobs.Load() {
+		w.setStatus("Wait for the server administration operation to finish before testing the connection.")
+		return
+	}
 	server, ok := w.server()
 	if !ok {
 		w.setServerTestStatus("Missing server details")
@@ -1262,6 +1331,10 @@ func (w *Window) testServerConnection() {
 }
 
 func (w *Window) startManualJobAction(action string) {
+	if w.running.Load() || w.managingServer.Load() || w.inspectingJobs.Load() {
+		w.setStatus("Wait for the active automation or server administration operation before managing a job.")
+		return
+	}
 	jobID := strings.TrimSpace(w.jobActionID.Text())
 	if jobID == "" {
 		w.setStatus("Enter the exact Fiery job ID before using a job action.")
@@ -1424,7 +1497,8 @@ func isTruthy(value string) bool {
 }
 
 func (w *Window) captureCapabilities() {
-	if w.running.Load() {
+	if w.running.Load() || w.managingServer.Load() || w.inspectingJobs.Load() {
+		w.setStatus("Wait for the active server operation before capturing capabilities.")
 		return
 	}
 	server, ok := w.server()
@@ -1506,7 +1580,7 @@ func (w *Window) setCaptureProgress(active bool, progress float32, phase string)
 
 func (w *Window) logCapabilitySummary(model capabilities.Model) {
 	groups := capabilities.GroupedOptions(model)
-	w.addLog("Discovered server %s serial=%s version=%s queues=%d options=%d groups=%d", fallback(model.ServerName, "unknown"), fallback(model.SerialNumber, "unknown"), fallback(model.Version, "unknown"), len(model.Queues), len(model.Options), len(groups))
+	w.addLog("Discovered server %s serial=%s version=%s queues=%d server_presets=%d options=%d groups=%d", fallback(model.ServerName, "unknown"), fallback(model.SerialNumber, "unknown"), fallback(model.Version, "unknown"), len(model.Queues), len(model.ServerPresets), len(model.Options), len(groups))
 	for _, group := range groups {
 		keys := make([]string, 0, len(group.Options))
 		for _, opt := range group.Options {
@@ -1517,7 +1591,8 @@ func (w *Window) logCapabilitySummary(model capabilities.Model) {
 }
 
 func (w *Window) startAPITrace() {
-	if w.running.Load() {
+	if w.running.Load() || w.managingServer.Load() || w.inspectingJobs.Load() {
+		w.setStatus("Wait for the active server operation before capturing an API trace.")
 		return
 	}
 	server, ok := w.server()
@@ -1543,6 +1618,14 @@ func (w *Window) startAPITrace() {
 		return
 	}
 	attrs := combinationToAttributes(combos[0])
+	w.mu.Lock()
+	capabilityModel := w.capabilities
+	w.mu.Unlock()
+	serverPreset, err := w.selectedServerPreset(capabilityModel)
+	if err != nil {
+		w.setStatus("API trace server preset selection is invalid: " + err.Error())
+		return
+	}
 	mode := runModes[0]
 	if modes := w.selectedRunModes(); len(modes) > 0 {
 		mode = modes[0]
@@ -1558,7 +1641,7 @@ func (w *Window) startAPITrace() {
 			w.running.Store(false)
 			w.invalidate()
 		}()
-		report := w.runAPITrace(ctx, server, selectedFiles[0], attrs, mode)
+		report := w.runAPITrace(ctx, server, selectedFiles[0], attrs, mode, serverPreset)
 		path, saveErr := saveAPITrace(report)
 		if saveErr != nil {
 			w.setStatus("API trace save failed: " + saveErr.Error())
@@ -1573,7 +1656,7 @@ func (w *Window) startAPITrace() {
 	})
 }
 
-func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection, file string, attrs map[string]string, mode runMode) apiTraceReport {
+func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection, file string, attrs map[string]string, mode runMode, serverPreset *fiery.ServerPreset) apiTraceReport {
 	report := apiTraceReport{
 		CapturedAt:     time.Now().Format(time.RFC3339Nano),
 		Server:         server.IPAddress,
@@ -1582,6 +1665,10 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 		Attributes:     attrs,
 		UpdateProtocol: "POST /live/api/v4/jobs/{id}; POST /live/api/v5/jobs/{id} fallback",
 		Result:         "ERROR",
+	}
+	if serverPreset != nil {
+		report.ServerPresetID = serverPreset.ID
+		report.ServerPresetName = serverPreset.Name
 	}
 	client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
 	if err != nil {
@@ -1617,6 +1704,14 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 		report.Lifecycle = "Custom page range validation failed: " + err.Error()
 		capture("page range validation failed")
 		return report
+	}
+	if serverPreset != nil {
+		if err := client.ApplyServerPreset(ctx, session, imp.JobID, serverPreset.ID); err != nil {
+			report.Error = err.Error()
+			capture("server preset application failed")
+			return report
+		}
+		capture("after server preset application")
 	}
 	w.mu.Lock()
 	capabilityModel := w.capabilities
@@ -1694,7 +1789,8 @@ func saveAPITrace(report apiTraceReport) (string, error) {
 }
 
 func (w *Window) startRun() {
-	if w.running.Load() {
+	if w.running.Load() || w.managingServer.Load() || w.inspectingJobs.Load() {
+		w.setStatus("Wait for the active server operation before starting automation.")
 		return
 	}
 	server, ok := w.server()
@@ -1710,6 +1806,14 @@ func (w *Window) startRun() {
 	combos, axes, err := w.selectedCombinations()
 	if err != nil {
 		w.setStatus("Feature input is invalid: " + err.Error())
+		return
+	}
+	w.mu.Lock()
+	capabilityModel := w.capabilities
+	w.mu.Unlock()
+	serverPreset, err := w.selectedServerPreset(capabilityModel)
+	if err != nil {
+		w.setStatus("Server preset selection is invalid: " + err.Error())
 		return
 	}
 	w.logSelectedCombinations(combos, axes)
@@ -1730,6 +1834,7 @@ func (w *Window) startRun() {
 	requestedWorkers := workers
 	workers = effectiveWorkerCount(workers, plannedTests)
 	w.addLog("Selected run modes: %s", formatRunModes(modes))
+	w.addLog("Selected Fiery server preset: %s", serverPresetDescription(serverPreset))
 	w.addLog("Parallel jobs requested=%d effective=%d planned_tests=%d", requestedWorkers, workers, plannedTests)
 	if !w.running.CompareAndSwap(false, true) {
 		return
@@ -1742,7 +1847,6 @@ func (w *Window) startRun() {
 		return
 	}
 	w.mu.Lock()
-	capabilityModel := w.capabilities
 	previousStore := w.resultStore
 	w.resultStore = resultStore
 	w.resultStoreError = ""
@@ -1761,6 +1865,7 @@ func (w *Window) startRun() {
 		PlannedTests:      plannedTests,
 		Workers:           workers,
 		Strategy:          string(w.strategy),
+		ServerPreset:      serverPresetDescription(serverPreset),
 		RunModes:          runModeLabels(modes),
 	}
 	w.results = nil
@@ -1775,11 +1880,11 @@ func (w *Window) startRun() {
 	w.cancel = cancel
 	w.setStatus("Running automation...")
 	w.launchBackground("Automation run", func() {
-		w.runAutomation(ctx, server, selectedFiles, workers, combos, modes)
+		w.runAutomation(ctx, server, selectedFiles, workers, combos, modes, serverPreset)
 	})
 }
 
-func (w *Window) runAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, combos []combinations.Combination, modes []runMode) {
+func (w *Window) runAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, combos []combinations.Combination, modes []runMode, serverPreset *fiery.ServerPreset) {
 	finalStatus := "Failed"
 	defer func() {
 		finalizeErr := w.finishRun(finalStatus)
@@ -1819,7 +1924,7 @@ func (w *Window) runAutomation(ctx context.Context, server model.ServerConnectio
 		go func() {
 			defer wg.Done()
 			for job := range jobs {
-				w.executeJobSafely(ctx, client, session, job.file, job.attrs, job.mode)
+				w.executeJobSafely(ctx, client, session, job.file, job.attrs, job.mode, serverPreset)
 			}
 		}()
 	}
@@ -1853,7 +1958,7 @@ func (w *Window) runAutomation(ctx context.Context, server model.ServerConnectio
 	w.setStatus("Finalizing automation results...")
 }
 
-func (w *Window) executeJobSafely(ctx context.Context, client *fiery.Client, session fiery.Session, file string, attrs map[string]string, mode runMode) {
+func (w *Window) executeJobSafely(ctx context.Context, client *fiery.Client, session fiery.Session, file string, attrs map[string]string, mode runMode, serverPreset *fiery.ServerPreset) {
 	result := reportxlsx.Result{JobName: filepath.Base(file), Mode: mode.Label, SetValues: cloneStringMap(attrs)}
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -1865,14 +1970,17 @@ func (w *Window) executeJobSafely(ctx context.Context, client *fiery.Client, ses
 			w.addResult(result)
 		}
 	}()
-	w.executeJob(ctx, client, session, file, attrs, mode, &result)
+	w.executeJob(ctx, client, session, file, attrs, mode, serverPreset, &result)
 }
 
-func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session fiery.Session, file string, attrs map[string]string, mode runMode, result *reportxlsx.Result) {
+func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session fiery.Session, file string, attrs map[string]string, mode runMode, serverPreset *fiery.ServerPreset, result *reportxlsx.Result) {
 	start := time.Now()
 	finish := func(status, detail string, got map[string]string) {
 		result.Result = status
 		result.DurationMS = time.Since(start).Milliseconds()
+		if serverPreset != nil {
+			detail += "; server preset=" + serverPresetDescription(serverPreset)
+		}
 		result.Detail = detail
 		result.JobName = jobNameFromAttributes(got, result.JobName)
 		result.GetValues = selectedReadbackValues(got, attrs)
@@ -1913,6 +2021,14 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 	if err := validateCustomPageRange(attrs, spooled); err != nil {
 		finish("FAIL", fmt.Sprintf("mode=%s: custom page range is invalid for %s: %v", mode.Label, filepath.Base(file), err), spooled)
 		return
+	}
+	if serverPreset != nil {
+		w.addLog("Applying Fiery server preset %s to job %s", serverPresetDescription(serverPreset), imp.JobID)
+		if err := client.ApplyServerPreset(ctx, session, imp.JobID, serverPreset.ID); err != nil {
+			finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), spooled)
+			return
+		}
+		w.addLog("Fiery server preset %s was accepted for job %s", serverPresetDescription(serverPreset), imp.JobID)
 	}
 	if len(attrs) > 0 {
 		w.mu.Lock()

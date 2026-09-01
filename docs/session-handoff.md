@@ -14,8 +14,8 @@ Updated: 2026-09-01
 
 ## Git state at handoff
 
-- Local `main` is ahead of `origin/main` (`e0999b0`) by 8 commits, including the custom page-range update.
-- Latest implementation commit: `8469edb feat: add feature tabs search ranges presets and lifecycle results`
+- Local `main` contains eight previously unpushed commits plus the current capability-taxonomy/server-administration/server-preset implementation. Nothing has been pushed.
+- Latest implementation work: PDF-aligned stacked capability sections, read-only server presets/application, and guarded server administration.
 - Implementation commits:
   - `1d4044a feat: add categorized constraint-aware capability metadata`
   - `c6f2a3e feat: add secure local settings preset store`
@@ -29,7 +29,8 @@ Updated: 2026-09-01
 
 ### Capability UX
 
-- Discovered features are grouped into Job info, Layout, Substrate, Color and Image, Finishing, VDP, Installable, and Other/Advanced tabs.
+- Discovered features are grouped into Job Info, Substrate/Media, Layout, Color, Image, Finishing, and VDP tabs. Quick Access is excluded; Installable and Other/Advanced remain only for advertised properties outside the PDF taxonomy.
+- Controls are vertically stacked in Antares/Capella/Vela Job Properties order under nested headings such as Job notes, Reporting, Die printing, Color input/settings, Edge enhancement, Advanced, Barcode, and Delivery option.
 - Search matches canonical labels, exact API keys, categories, current/default values, and advertised values across categories.
 - Common aliases are deduplicated while preserving exact server IDs for updates and readback.
 - `efirange` metadata retains min, max, increment, and precision and renders as a validated numeric field rather than checkboxes.
@@ -40,10 +41,18 @@ Updated: 2026-09-01
 
 ### Presets
 
-- Local settings presets save selected values, numeric inputs, combination strategy, Max cases, worker count, file mode, and run modes.
+- Local settings presets save selected values, numeric inputs, combination strategy, Max cases, worker count, file mode, run modes, and a safe Fiery server-preset ID.
 - Presets explicitly exclude password, secret/API key, cookies, server address, and file paths.
 - Storage is versioned and atomic under the user's configuration directory.
-- Loading reconciles values and numeric limits against the currently discovered Fiery and reports skipped stale values.
+- Loading reconciles values, numeric limits, and server-preset IDs against the currently discovered Fiery and reports skipped stale values.
+- Capability capture includes read-only `GET /live/api/v5/presets`. The UI can select one advertised preset and applies it to each stable spooled job before explicit capability overrides; there are no create/edit/delete controls.
+
+### Server administration
+
+- A separate Administration workspace provides Fiery-process restart, full-server reboot, job inventory, and clear-all-jobs.
+- Restart/reboot are blocked during other operations, require native confirmation, and monitor recovery through re-login plus `/server/status`.
+- Clear-all-jobs requests only `method=clear&services=jobs`. It requires a fresh inventory for the exact server, exact typed `CLEAR ALL JOBS`, a second confirmation showing server/count, immediate count revalidation, and verified empty inventory.
+- Malformed or partial/paginated HTTP-200 job inventory responses are errors and can never be interpreted as zero or a misleadingly low job count.
 
 ### Constraints
 
@@ -81,7 +90,7 @@ The following passed after implementation:
 
 Built executable SHA-256:
 
-`6d10150547ca8de75d0e577647e7f581f0a5c6c84ed2fd05904223ab3bccaa5f`
+`67a44cba492ff1092cadf5afd429520de90a7671bc129659a19673757cfac16d`
 
 ## Recommended next action
 
@@ -93,5 +102,7 @@ Run a small live Fiery validation before a high-concurrency campaign:
 4. Run known-failure XPS and invalid-paper cases and confirm they FAIL with the Fiery processing error even if selected settings read back.
 5. On a known multi-page PDF, enter a custom page range such as `1,3,5-8`; confirm the job receives `EFPageRange=Range1` plus `DPP_PAGE_RANGE`, and confirm a page beyond the original count fails before update.
 6. Run a constrained pair in a low Max-cases test and confirm local skipped-count reporting plus server constraint validation.
-7. Inspect diagnostic JSON, API trace, JSONL, and Excel lifecycle columns for agreement.
-8. Increase worker count only after the small run is stable.
+7. Confirm server presets populate on a target with known presets, apply one to a disposable imported job, and verify explicit selected capabilities override it afterward.
+8. On an isolated test Fiery, inspect the Administration job count and validate restart/reboot recovery monitoring. Validate clear-all-jobs only with disposable jobs and explicit authorization; never test it against production jobs.
+9. Inspect diagnostic JSON, API trace, JSONL, and Excel lifecycle columns for agreement.
+10. Increase worker count only after the small run is stable.

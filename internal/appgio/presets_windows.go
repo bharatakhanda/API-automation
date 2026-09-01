@@ -15,7 +15,7 @@ import (
 )
 
 func (w *Window) saveCurrentPreset() {
-	if w.running.Load() {
+	if w.running.Load() || w.managingServer.Load() || w.inspectingJobs.Load() {
 		w.setStatus("Wait for the active operation to finish before saving a preset.")
 		return
 	}
@@ -72,8 +72,12 @@ func (w *Window) saveCurrentPreset() {
 			numeric[pageRangeDataID] = value
 		}
 	}
+	serverPresetID := ""
+	if selectedPreset, err := w.selectedServerPreset(model); err == nil && selectedPreset != nil {
+		serverPresetID = selectedPreset.ID
+	}
 	preset := presets.Preset{
-		Name: name, ServerName: model.ServerName, ServerSerial: model.SerialNumber,
+		Name: name, ServerName: model.ServerName, ServerSerial: model.SerialNumber, ServerPresetID: serverPresetID,
 		SelectedValues: selected, NumericInputs: numeric,
 		Strategy: string(w.strategy), MaxCases: strings.TrimSpace(w.maxCases.Text()), ParallelJobs: strings.TrimSpace(w.workers.Text()),
 		RunModes: runModeLabels(w.selectedRunModes()), FileMode: w.fileModeGroup.Value,
@@ -88,7 +92,7 @@ func (w *Window) saveCurrentPreset() {
 }
 
 func (w *Window) loadNamedPreset() {
-	if w.running.Load() {
+	if w.running.Load() || w.managingServer.Load() || w.inspectingJobs.Load() {
 		w.setStatus("Wait for the active operation to finish before loading a preset.")
 		return
 	}
@@ -174,6 +178,19 @@ func (w *Window) loadNamedPreset() {
 	if preset.FileMode == "all" || preset.FileMode == "single" || preset.FileMode == "random" {
 		w.fileModeGroup.Value = preset.FileMode
 	}
+	if preset.ServerPresetID != "" {
+		found := false
+		for _, serverPreset := range model.ServerPresets {
+			if serverPreset.ID == preset.ServerPresetID {
+				w.serverPresetGroup.Value = serverPreset.ID
+				found = true
+				break
+			}
+		}
+		if !found {
+			missing++
+		}
+	}
 	selectedModes := make(map[string]struct{}, len(preset.RunModes))
 	for _, label := range preset.RunModes {
 		selectedModes[label] = struct{}{}
@@ -197,7 +214,7 @@ func (w *Window) loadNamedPreset() {
 }
 
 func (w *Window) deleteNamedPreset() {
-	if w.running.Load() {
+	if w.running.Load() || w.managingServer.Load() || w.inspectingJobs.Load() {
 		w.setStatus("Wait for the active operation to finish before deleting a preset.")
 		return
 	}

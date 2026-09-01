@@ -19,6 +19,7 @@ type Preset struct {
 	UpdatedAt      time.Time           `json:"updatedAt"`
 	ServerName     string              `json:"serverName,omitempty"`
 	ServerSerial   string              `json:"serverSerial,omitempty"`
+	ServerPresetID string              `json:"serverPresetId,omitempty"`
 	SelectedValues map[string][]string `json:"selectedValues,omitempty"`
 	NumericInputs  map[string]string   `json:"numericInputs,omitempty"`
 	Strategy       string              `json:"strategy"`

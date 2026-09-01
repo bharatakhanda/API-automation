@@ -44,6 +44,23 @@ func TestStoreSaveReplaceListAndDelete(t *testing.T) {
 	}
 }
 
+func TestStorePersistsSafeServerPresetSelection(t *testing.T) {
+	store, err := New(filepath.Join(t.TempDir(), "presets.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(Preset{Name: "Production", ServerPresetID: "SERVER-PRESET-1"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ServerPresetID != "SERVER-PRESET-1" {
+		t.Fatalf("presets = %#v", got)
+	}
+}
+
 func TestStoreRejectsInvalidNamesAndCorruptFiles(t *testing.T) {
 	store, err := New(filepath.Join(t.TempDir(), "presets.json"))
 	if err != nil {
