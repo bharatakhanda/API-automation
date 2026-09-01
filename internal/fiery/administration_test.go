@@ -71,9 +71,9 @@ func TestServerAdministrationUsesOnlyDocumentedV5Operations(t *testing.T) {
 			}
 			seen["clear"] = true
 			_, _ = w.Write([]byte(`{"clear":true}`))
-		case r.Method == http.MethodGet && r.URL.Path == apiV5+"/server/status":
+		case r.Method == http.MethodGet && r.URL.Path == apiV5+"/status":
 			seen["status"] = true
-			_, _ = w.Write([]byte(`{"data":{"item":{"fiery":"running"}}}`))
+			_, _ = w.Write([]byte(`{"data":{"item":{"fiery":"running","fieryExtendedStatus":"none"}}}`))
 		default:
 			t.Fatalf("unexpected administration request: %s %s", r.Method, r.URL.String())
 		}
@@ -101,9 +101,30 @@ func TestServerAdministrationUsesOnlyDocumentedV5Operations(t *testing.T) {
 	if err != nil || status != "running" {
 		t.Fatalf("status=%q err=%v", status, err)
 	}
+	activity, err := client.ServerActivityStatus(context.Background(), session)
+	if err != nil || activity.Health != "running" || activity.Extended != "none" || activity.Workload != "Idle" {
+		t.Fatalf("activity=%#v err=%v", activity, err)
+	}
 	for _, operation := range []string{"jobs", "restart", "reboot", "clear", "status"} {
 		if !seen[operation] {
 			t.Fatalf("operation %q was not called: %#v", operation, seen)
+		}
+	}
+}
+
+func TestFieryWorkloadStateUsesExtendedAPIStatus(t *testing.T) {
+	for _, test := range []struct {
+		health, extended, want string
+	}{
+		{"running", "none", "Idle"},
+		{"running", "idle", "Idle"},
+		{"running", "printing", "Busy"},
+		{"running", "processing job", "Busy"},
+		{"restarting", "none", "Busy"},
+		{"stopped", "none", "Unavailable"},
+	} {
+		if got := fieryWorkloadState(test.health, test.extended); got != test.want {
+			t.Fatalf("workload(%q, %q) = %q, want %q", test.health, test.extended, got, test.want)
 		}
 	}
 }

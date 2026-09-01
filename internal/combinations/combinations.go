@@ -9,6 +9,10 @@ import (
 type Strategy string
 
 const (
+	// StrategySingle creates one configuration from the first value on each
+	// normalized axis. StrategySelected is retained for legacy presets and API
+	// callers where it means the Cartesian product of explicitly selected values.
+	StrategySingle   Strategy = "single"
 	StrategySelected Strategy = "selected"
 	StrategyAll      Strategy = "all"
 	StrategyPairwise Strategy = "pairwise"
@@ -28,6 +32,8 @@ func Generate(axes []Axis, limit int) []Combination { return cartesian(axes, lim
 
 func GenerateWithStrategy(axes []Axis, strategy Strategy, limit int) []Combination {
 	switch strategy {
+	case StrategySingle:
+		return single(axes, limit)
 	case StrategyPairwise:
 		return pairwise(axes, limit)
 	case StrategyRandom:
@@ -35,6 +41,18 @@ func GenerateWithStrategy(axes []Axis, strategy Strategy, limit int) []Combinati
 	default:
 		return cartesian(axes, limit)
 	}
+}
+
+func single(axes []Axis, limit int) []Combination {
+	axes = normalizeAxes(axes)
+	if len(axes) == 0 || limit == 0 {
+		return nil
+	}
+	combination := make(Combination, len(axes))
+	for _, axis := range axes {
+		combination[axis.Name] = axis.Values[0]
+	}
+	return []Combination{combination}
 }
 
 func cartesian(axes []Axis, limit int) []Combination {

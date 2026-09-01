@@ -204,22 +204,61 @@ func (c *Client) ClearAllJobs(ctx context.Context, session Session) error {
 	return nil
 }
 
+type ServerActivityStatus struct {
+	Health   string
+	Extended string
+	Workload string
+}
+
 func (c *Client) ServerStatus(ctx context.Context, session Session) (string, error) {
-	body, err := c.v5JSONRequest(ctx, session, http.MethodGet, "/server/status", nil, nil)
+	activity, err := c.ServerActivityStatus(ctx, session)
+	return activity.Health, err
+}
+
+// ServerActivityStatus keeps Fiery process health separate from workload. The
+// status endpoint commonly reports fiery=running while fieryExtendedStatus=none;
+// that means the service is healthy and idle, not that a job is running.
+func (c *Client) ServerActivityStatus(ctx context.Context, session Session) (ServerActivityStatus, error) {
+	// Capability discovery and the live Fiery API expose workload at /status.
+	// /server/status is an administration route and can remain at running/none
+	// while a job is actively processing.
+	body, err := c.v5JSONRequest(ctx, session, http.MethodGet, "/status", nil, nil)
 	if err != nil {
-		return "", err
+		return ServerActivityStatus{}, err
 	}
 	var payload any
 	if json.Unmarshal(body, &payload) != nil {
-		return "", errors.New("fiery server status response was not valid JSON")
+		return ServerActivityStatus{}, errors.New("fiery server status response was not valid JSON")
 	}
-	if status := findScalarByKey(payload, "fiery"); status != "" {
-		return status, nil
+	health := findScalarByKey(payload, "fiery")
+	if health == "" {
+		health = findScalarByKey(payload, "status")
 	}
-	if status := findScalarByKey(payload, "status"); status != "" {
-		return status, nil
+	if health == "" {
+		return ServerActivityStatus{}, errors.New("fiery server status response did not contain a status")
 	}
-	return "", errors.New("fiery server status response did not contain a status")
+	extended := findScalarByKey(payload, "fieryExtendedStatus")
+	return ServerActivityStatus{
+		Health: health, Extended: extended, Workload: fieryWorkloadState(health, extended),
+	}, nil
+}
+
+func fieryWorkloadState(health, extended string) string {
+	health = strings.ToLower(strings.TrimSpace(health))
+	extended = strings.ToLower(strings.TrimSpace(extended))
+	for _, token := range []string{"busy", "print", "rip", "process", "spool", "calibrat", "warming", "restart", "reboot"} {
+		if strings.Contains(extended, token) || strings.Contains(health, token) {
+			return "Busy"
+		}
+	}
+	switch extended {
+	case "", "none", "idle", "ready", "running":
+		switch health {
+		case "running", "online", "ready", "idle":
+			return "Idle"
+		}
+	}
+	return "Unavailable"
 }
 
 func (c *Client) v5JSONRequest(ctx context.Context, session Session, method, path string, query url.Values, payload any) ([]byte, error) {

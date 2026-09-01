@@ -43,19 +43,8 @@ func (w *Window) saveCurrentPreset() {
 			continue
 		}
 		if chosen := selectedValues(values); len(chosen) > 0 {
-			if isPageRangeOption(optionID) {
-				filtered := chosen[:0]
-				for _, value := range chosen {
-					if !strings.EqualFold(strings.TrimSpace(value), pageRangeCustomServerValue) {
-						filtered = append(filtered, value)
-					}
-				}
-				chosen = filtered
-			}
-			if len(chosen) > 0 {
-				sort.Strings(chosen)
-				selected[optionID] = chosen
-			}
+			sort.Strings(chosen)
+			selected[optionID] = chosen
 		}
 	}
 	numeric := make(map[string]string)
@@ -67,10 +56,8 @@ func (w *Window) saveCurrentPreset() {
 			numeric[optionID] = value
 		}
 	}
-	if value := strings.TrimSpace(w.pageRangeInput.Text()); value != "" {
-		if _, exists := model.OptionByID(pageRangeOptionID); exists {
-			numeric[pageRangeDataID] = value
-		}
+	if value := strings.TrimSpace(w.pageRangeInput.Text()); value != "" && customPageRangeSupported(model) {
+		numeric[pageRangeOptionID] = value
 	}
 	serverPresetID := ""
 	if selectedPreset, err := w.selectedServerPreset(model); err == nil && selectedPreset != nil {
@@ -79,7 +66,8 @@ func (w *Window) saveCurrentPreset() {
 	preset := presets.Preset{
 		Name: name, ServerName: model.ServerName, ServerSerial: model.SerialNumber, ServerPresetID: serverPresetID,
 		SelectedValues: selected, NumericInputs: numeric,
-		Strategy: string(w.strategy), MaxCases: strings.TrimSpace(w.maxCases.Text()), ParallelJobs: strings.TrimSpace(w.workers.Text()),
+		Strategy: string(w.strategy), ValueSource: string(w.valueSource), TestIntent: string(w.testIntent), ConstraintMode: string(w.constraintMode),
+		MaxCases: strings.TrimSpace(w.maxCases.Text()), ParallelJobs: strings.TrimSpace(w.workers.Text()),
 		RunModes: runModeLabels(w.selectedRunModes()), FileMode: w.fileModeGroup.Value,
 	}
 	if err := w.presetStore.Save(preset); err != nil {
@@ -116,16 +104,12 @@ func (w *Window) loadNamedPreset() {
 		available := checkboxOptionValues(option)
 		ensureBools(w.selected, optionID, available)
 		for _, value := range values {
-			if isPageRangeOption(optionID) && strings.EqualFold(strings.TrimSpace(value), pageRangeCustomServerValue) {
-				missing++
-				continue
-			}
-			if !containsStringFold(available, value) {
+			if !containsOptionValue(available, optionID, value) {
 				missing++
 				continue
 			}
 			for _, current := range available {
-				if strings.EqualFold(current, value) {
+				if optionValueMatches(optionID, current, value) {
 					w.selected[optionID][current].Value = true
 					break
 				}
@@ -133,8 +117,8 @@ func (w *Window) loadNamedPreset() {
 		}
 	}
 	for optionID, value := range preset.NumericInputs {
-		if strings.EqualFold(optionID, pageRangeDataID) {
-			if _, exists := model.OptionByID(pageRangeOptionID); !exists {
+		if strings.EqualFold(optionID, pageRangeOptionID) || strings.EqualFold(optionID, pageRangeLegacyDataID) {
+			if !customPageRangeSupported(model) {
 				missing++
 				continue
 			}
@@ -166,8 +150,20 @@ func (w *Window) loadNamedPreset() {
 		w.numericInput(optionID).SetText(value)
 	}
 	switch combinations.Strategy(preset.Strategy) {
-	case combinations.StrategySelected, combinations.StrategyAll, combinations.StrategyPairwise:
+	case combinations.StrategySingle, combinations.StrategySelected, combinations.StrategyAll, combinations.StrategyPairwise, combinations.StrategyRandom:
 		w.strategy = combinations.Strategy(preset.Strategy)
+	}
+	switch automationValueSource(preset.ValueSource) {
+	case valueSourceBaseline, valueSourceDefaults, valueSourceSelected, valueSourceAdvertised:
+		w.valueSource = automationValueSource(preset.ValueSource)
+	}
+	switch automationTestIntent(preset.TestIntent) {
+	case testIntentPositive, testIntentConstraint:
+		w.testIntent = automationTestIntent(preset.TestIntent)
+	}
+	switch constraintTestMode(preset.ConstraintMode) {
+	case constraintValidationOnly, constraintControlledApply:
+		w.constraintMode = constraintTestMode(preset.ConstraintMode)
 	}
 	if value := strings.TrimSpace(preset.MaxCases); value != "" {
 		w.maxCases.SetText(strconvItoa(parseCaseLimit(value)))
@@ -267,8 +263,12 @@ func (w *Window) findPreset(name string) (presets.Preset, bool) {
 }
 
 func containsStringFold(values []string, want string) bool {
+	return containsOptionValue(values, "", want)
+}
+
+func containsOptionValue(values []string, optionID, want string) bool {
 	for _, value := range values {
-		if strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(want)) {
+		if optionValueMatches(optionID, value, want) {
 			return true
 		}
 	}

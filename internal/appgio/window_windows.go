@@ -10,7 +10,6 @@ import (
 	"image"
 	"image/color"
 	"math"
-	mathrand "math/rand/v2"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -31,7 +30,6 @@ import (
 	"api-automation/internal/pagevalues"
 	"api-automation/internal/preflight"
 	"api-automation/internal/presets"
-	"api-automation/internal/rangevalues"
 	"api-automation/internal/reportxlsx"
 
 	"gioui.org/app"
@@ -47,15 +45,16 @@ import (
 )
 
 const (
-	pageRangeOptionID          = "EFPageRange"
-	pageRangeDataID            = "DPP_PAGE_RANGE"
-	pageRangeCustomServerValue = "Range1"
-	pageRangeInternalPrefix    = "__API_AUTOMATION_CUSTOM_PAGE_RANGE__:"
-	noServerPresetID           = "__API_AUTOMATION_NO_SERVER_PRESET__"
+	pageRangeOptionID       = "EFPageRange"
+	pageRangeLegacyDataID   = "DPP_PAGE_RANGE"
+	pageRangeRangeValue     = "Range1"
+	pageRangeInternalPrefix = "__API_AUTOMATION_CUSTOM_PAGE_RANGE__:"
+	outputProfileOptionID   = "EFOutProfile"
+	noServerPresetID        = "__API_AUTOMATION_NO_SERVER_PRESET__"
 
 	defaultCaseLimit       = 100
 	maxCaseLimit           = 10_000
-	maxWorkerCount         = 1000
+	maxWorkerCount         = 10
 	maxDisplayedResults    = 250
 	maxDisplayedLogLines   = 500
 	maxRetainedResults     = 2_000
@@ -64,11 +63,38 @@ const (
 )
 
 const (
-	pageSettings = iota
-	pageCapabilities
-	pageAdministration
+	pageConnection = iota
+	pageOverview
+	pageTestSettings
+	pageJobProperties
+	pageAutomation
 	pageResults
 	pageLogs
+	pageAdministration
+	pageCount
+)
+
+type automationValueSource string
+
+const (
+	valueSourceBaseline   automationValueSource = "baseline"
+	valueSourceDefaults   automationValueSource = "defaults"
+	valueSourceSelected   automationValueSource = "selected"
+	valueSourceAdvertised automationValueSource = "advertised"
+)
+
+type automationTestIntent string
+
+const (
+	testIntentPositive   automationTestIntent = "positive"
+	testIntentConstraint automationTestIntent = "constraint"
+)
+
+type constraintTestMode string
+
+const (
+	constraintValidationOnly  constraintTestMode = "validation"
+	constraintControlledApply constraintTestMode = "controlled_apply"
 )
 
 var palette = struct {
@@ -88,10 +114,11 @@ var palette = struct {
 }
 
 type Window struct {
-	window *app.Window
-	theme  *material.Theme
-	ops    op.Ops
-	list   widget.List
+	window       *app.Window
+	theme        *material.Theme
+	ops          op.Ops
+	list         widget.List
+	categoryList widget.List
 
 	serverIP, secretKey, password widget.Editor
 	folderPath, filePath          widget.Editor
@@ -101,7 +128,7 @@ type Window struct {
 	capabilitySearch, presetName  widget.Editor
 	adminConfirmation             widget.Editor
 
-	captureButton, runButton, cancelButton, resetButton    widget.Clickable
+	runButton, cancelButton                                widget.Clickable
 	testServerButton, apiTraceButton, exportButton         widget.Clickable
 	cancelJobButton, deleteJobButton                       widget.Clickable
 	savePresetButton, loadPresetButton, deletePresetButton widget.Clickable
@@ -109,13 +136,29 @@ type Window struct {
 	rebootServerButton, clearAllJobsButton                 widget.Clickable
 	browseFolderButton, browseFileButton                   widget.Clickable
 	navButtons                                             []widget.Clickable
-	selectedOnlyButton, allPermButton, pairwiseButton      widget.Clickable
+	applyConnectionButton, cancelConnectionChangeButton    widget.Clickable
+	changeConnectionButton, overviewCaptureButton          widget.Clickable
+	resetPropertiesButton, resetAutomationButton           widget.Clickable
+	resetTestSetupButton                                   widget.Clickable
+	baselineSourceButton, defaultsSourceButton             widget.Clickable
+	selectedSourceButton, advertisedSourceButton           widget.Clickable
+	positiveIntentButton, constraintIntentButton           widget.Clickable
+	validationOnlyButton, controlledApplyButton            widget.Clickable
+	singleStrategyButton, randomStrategyButton             widget.Clickable
+	allPermButton, pairwiseButton                          widget.Clickable
 	modeChecks                                             []widget.Bool
 	fileModeGroup                                          widget.Enum
 
-	activePage        int
-	strategy          combinations.Strategy
-	serverPresetGroup widget.Enum
+	activePage          int
+	strategy            combinations.Strategy
+	valueSource         automationValueSource
+	testIntent          automationTestIntent
+	constraintMode      constraintTestMode
+	serverPresetGroup   widget.Enum
+	activeServer        model.ServerConnection
+	hasActiveServer     bool
+	configuredSecret    string
+	testedConnectionKey string
 
 	capabilities          capabilities.Model
 	selected              map[string]map[string]*widget.Bool
@@ -138,8 +181,18 @@ type Window struct {
 	logCount              int
 	results               []resultRow
 	resultCount           int
+	passedCount           int
+	failedCount           int
+	errorCount            int
 	status                string
 	serverTestStatus      string
+	serverTestOK          bool
+	healthStatus          string
+	healthDetail          string
+	healthCheckedAt       time.Time
+	healthLatency         time.Duration
+	healthCancel          context.CancelFunc
+	healthGeneration      uint64
 	captureActive         bool
 	captureProgress       float32
 	capturePhase          string
@@ -169,11 +222,14 @@ type workspacePage struct {
 }
 
 var workspacePages = []workspacePage{
-	{NavigationLabel: "Settings", Title: "Settings", Subtitle: "Configure server connection, test files, and Fiery run mode."},
-	{NavigationLabel: "Capabilities", Title: "Capabilities", Subtitle: "Discover Fiery capabilities and choose job options for automation."},
-	{NavigationLabel: "Administration", Title: "Server administration", Subtitle: "Perform explicitly confirmed Fiery process and job-maintenance actions."},
-	{NavigationLabel: "Results", Title: "Results", Subtitle: "Review automation outcomes, verification status, and execution details."},
-	{NavigationLabel: "Activity logs", Title: "Activity logs", Subtitle: "Review live operational messages and diagnostic-log location."},
+	{NavigationLabel: "Connection", Title: "Server Connection", Subtitle: "Test and approve a Fiery connection before configuring automation."},
+	{NavigationLabel: "Overview", Title: "Overview", Subtitle: "Server details, capability readiness, and automation progress."},
+	{NavigationLabel: "Test Settings", Title: "Test Settings", Subtitle: "Choose the local test assets used by this automation run."},
+	{NavigationLabel: "Job Properties", Title: "Job Properties", Subtitle: "Choose exact server-advertised values in the Fiery property hierarchy."},
+	{NavigationLabel: "Automation", Title: "Automation", Subtitle: "Define test intent, value source, generation strategy, lifecycle, and concurrency."},
+	{NavigationLabel: "Results", Title: "Results", Subtitle: "Review strict set/get evidence and lifecycle verdicts."},
+	{NavigationLabel: "Activity Logs", Title: "Activity Logs", Subtitle: "Review application activity and the complete diagnostic-log location."},
+	{NavigationLabel: "Administration", Title: "Administration", Subtitle: "Guarded Fiery restart, reboot, inventory, and clear-jobs operations."},
 }
 
 type apiTraceStage struct {
@@ -232,15 +288,19 @@ func New() *Window {
 		window: new(app.Window), theme: material.NewTheme(),
 		selected: map[string]map[string]*widget.Bool{}, groupChecks: map[string]*widget.Bool{}, optionChecks: map[string]*widget.Bool{},
 		numericInputs: map[string]*widget.Editor{}, categoryButtons: map[string]*widget.Clickable{},
-		strategy: combinations.StrategySelected, activeCapabilityGroup: "Job Info",
-		status: "Ready · Open Settings, discover capabilities, then run automation.", diagnostic: newDiagnosticLog(),
+		strategy: combinations.StrategySingle, valueSource: valueSourceSelected,
+		testIntent: testIntentPositive, constraintMode: constraintValidationOnly,
+		activeCapabilityGroup: "Job Info", activePage: pageConnection,
+		configuredSecret: fiery.DefaultSecretKey,
+		status:           "Test and approve a server connection to begin.", diagnostic: newDiagnosticLog(),
 		appContext: appContext, appCancel: appCancel,
 	}
 	w.theme.Palette = material.Palette{Bg: palette.bg, Fg: palette.text, ContrastBg: palette.primary, ContrastFg: rgb(0xffffff)}
 	w.theme.TextSize = 15
 	w.list.Axis = layout.Vertical
+	w.categoryList.Axis = layout.Horizontal
 	initEditor(&w.serverIP, "")
-	initEditor(&w.secretKey, fiery.DefaultSecretKey)
+	initEditor(&w.secretKey, "")
 	initEditor(&w.password, "")
 	w.secretKey.Mask = '•'
 	w.password.Mask = '•'
@@ -267,8 +327,9 @@ func New() *Window {
 		w.modeChecks[0].Value = true
 	}
 	w.serverTestStatus = "Not tested"
+	w.healthStatus = "Not checked"
 	w.adminStatus = "No administrative action is in progress."
-	w.window.Option(app.Title("API Automation"), app.Size(unit.Dp(1240), unit.Dp(900)), app.MinSize(unit.Dp(1100), unit.Dp(760)))
+	w.window.Option(app.Title("API Automation"), app.Size(unit.Dp(1180), unit.Dp(820)), app.MinSize(unit.Dp(1024), unit.Dp(700)))
 	return w
 }
 
@@ -386,8 +447,34 @@ func (w *Window) invalidate() {
 }
 
 func (w *Window) handleClicks(gtx layout.Context) {
-	for w.resetButton.Clicked(gtx) {
-		w.resetSelections()
+	// Editors consume key events during Update/Layout. Drain them before button
+	// actions read Text(), including editors on a page being left this frame.
+	w.updateEditors(gtx)
+	w.invalidateChangedConnectionTest()
+
+	for w.testServerButton.Clicked(gtx) {
+		w.testServerConnection()
+	}
+	for w.applyConnectionButton.Clicked(gtx) {
+		w.applyTestedConnection()
+	}
+	for w.cancelConnectionChangeButton.Clicked(gtx) {
+		w.cancelConnectionChange()
+	}
+	for w.changeConnectionButton.Clicked(gtx) {
+		w.beginConnectionChange()
+	}
+	for w.overviewCaptureButton.Clicked(gtx) {
+		w.captureCapabilities()
+	}
+	for w.resetPropertiesButton.Clicked(gtx) {
+		w.resetJobProperties()
+	}
+	for w.resetAutomationButton.Clicked(gtx) {
+		w.resetAutomationSettings()
+	}
+	for w.resetTestSetupButton.Clicked(gtx) {
+		w.resetTestSetup()
 	}
 	for w.cancelJobButton.Clicked(gtx) {
 		w.startManualJobAction("cancel")
@@ -429,13 +516,6 @@ func (w *Window) handleClicks(gtx layout.Context) {
 			w.list.Position = layout.Position{}
 		}
 	}
-	for w.testServerButton.Clicked(gtx) {
-		w.testServerConnection()
-	}
-	for w.captureButton.Clicked(gtx) {
-		w.setActivePage(pageCapabilities)
-		w.captureCapabilities()
-	}
 	for w.runButton.Clicked(gtx) {
 		w.setActivePage(pageResults)
 		w.startRun()
@@ -468,14 +548,60 @@ func (w *Window) handleClicks(gtx layout.Context) {
 			w.addLog("Cancellation requested")
 		}
 	}
-	for w.selectedOnlyButton.Clicked(gtx) {
-		w.strategy = combinations.StrategySelected
+	for w.singleStrategyButton.Clicked(gtx) {
+		w.strategy = combinations.StrategySingle
 	}
 	for w.allPermButton.Clicked(gtx) {
 		w.strategy = combinations.StrategyAll
 	}
 	for w.pairwiseButton.Clicked(gtx) {
 		w.strategy = combinations.StrategyPairwise
+	}
+	for w.randomStrategyButton.Clicked(gtx) {
+		w.strategy = combinations.StrategyRandom
+	}
+	for w.baselineSourceButton.Clicked(gtx) {
+		w.valueSource = valueSourceBaseline
+	}
+	for w.defaultsSourceButton.Clicked(gtx) {
+		w.valueSource = valueSourceDefaults
+	}
+	for w.selectedSourceButton.Clicked(gtx) {
+		w.valueSource = valueSourceSelected
+	}
+	for w.advertisedSourceButton.Clicked(gtx) {
+		w.valueSource = valueSourceAdvertised
+	}
+	for w.positiveIntentButton.Clicked(gtx) {
+		w.testIntent = testIntentPositive
+	}
+	for w.constraintIntentButton.Clicked(gtx) {
+		w.testIntent = testIntentConstraint
+	}
+	for w.validationOnlyButton.Clicked(gtx) {
+		w.constraintMode = constraintValidationOnly
+	}
+	for w.controlledApplyButton.Clicked(gtx) {
+		w.constraintMode = constraintControlledApply
+	}
+}
+
+func (w *Window) updateEditors(gtx layout.Context) {
+	editors := []*widget.Editor{
+		&w.serverIP, &w.secretKey, &w.password,
+		&w.folderPath, &w.filePath, &w.workers, &w.maxCases,
+		&w.copiesInput, &w.pageRangeInput, &w.jobActionID,
+		&w.capabilitySearch, &w.presetName, &w.adminConfirmation,
+	}
+	for _, editor := range w.numericInputs {
+		editors = append(editors, editor)
+	}
+	for _, editor := range editors {
+		for {
+			if _, ok := editor.Update(gtx); !ok {
+				break
+			}
+		}
 	}
 }
 
@@ -495,7 +621,10 @@ func (w *Window) resetSelections() {
 	for _, selected := range w.optionChecks {
 		selected.Value = false
 	}
-	w.strategy = combinations.StrategySelected
+	w.strategy = combinations.StrategySingle
+	w.valueSource = valueSourceSelected
+	w.testIntent = testIntentPositive
+	w.constraintMode = constraintValidationOnly
 	w.copiesInput.SetText("1")
 	w.pageRangeInput.SetText("")
 	for _, input := range w.numericInputs {
@@ -525,14 +654,25 @@ func (w *Window) setActivePage(page int) {
 	if page < 0 || page >= len(workspacePages) || page == w.activePage {
 		return
 	}
+	w.mu.Lock()
+	connected := w.hasActiveServer
+	w.mu.Unlock()
+	if !connected && page != pageConnection {
+		w.setStatus("Test the server connection and press OK before opening other pages.")
+		return
+	}
+	w.stopOverviewHealthMonitor()
 	w.activePage = page
 	w.list.Position = layout.Position{}
+	if page == pageOverview {
+		w.startOverviewHealthMonitor()
+	}
 }
 
 func (w *Window) layout(gtx layout.Context) layout.Dimensions {
 	paint.Fill(gtx.Ops, palette.bg)
 	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.sidebar(gtx) }),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.workflowSidebar(gtx) }),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(24), Right: unit.Dp(20), Bottom: unit.Dp(20), Left: unit.Dp(28)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				listStyle := material.List(w.theme, &w.list)
@@ -541,122 +681,12 @@ func (w *Window) layout(gtx layout.Context) layout.Dimensions {
 				listStyle.ScrollbarStyle.Indicator.HoverColor = palette.primary
 				listStyle.ScrollbarStyle.Indicator.MinorWidth = unit.Dp(8)
 				listStyle.ScrollbarStyle.Indicator.CornerRadius = unit.Dp(4)
-				return listStyle.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions { return w.content(gtx) })
+				return listStyle.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions { return w.workflowContent(gtx) })
 			})
 		}),
 	)
 }
 
-func (w *Window) sidebar(gtx layout.Context) layout.Dimensions {
-	gtx.Constraints.Min.X, gtx.Constraints.Max.X = gtx.Dp(unit.Dp(210)), gtx.Dp(unit.Dp(210))
-	paint.FillShape(gtx.Ops, palette.navy, clip.Rect{Max: gtx.Constraints.Max}.Op())
-	return layout.Inset{Top: unit.Dp(24), Left: unit.Dp(18), Right: unit.Dp(18)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		if len(w.navButtons) != len(workspacePages) {
-			w.navButtons = make([]widget.Clickable, len(workspacePages))
-		}
-		children := []layout.FlexChild{
-			layout.Rigid(label(w.theme, "API Automation", 20, rgb(0xffffff)).Layout),
-			layout.Rigid(spacer(26)),
-			layout.Rigid(label(w.theme, "Workspace", 13, rgb(0x93a4bd)).Layout),
-			layout.Rigid(spacer(14)),
-		}
-		for pageIndex, page := range workspacePages {
-			children = append(children, layout.Rigid(navButton(w.theme, &w.navButtons[pageIndex], page.NavigationLabel, w.activePage == pageIndex)))
-		}
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
-	})
-}
-
-func (w *Window) content(gtx layout.Context) layout.Dimensions {
-	children := []layout.FlexChild{layout.Rigid(w.header), layout.Rigid(spacer(18))}
-	switch w.activePage {
-	case pageCapabilities:
-		children = append(children, layout.Rigid(w.capabilitiesCard))
-	case pageAdministration:
-		children = append(children, layout.Rigid(w.administrationCard))
-	case pageResults:
-		children = append(children, layout.Rigid(w.resultsCard))
-	case pageLogs:
-		children = append(children, layout.Rigid(w.logsCard))
-	default:
-		children = append(children, layout.Rigid(w.settingsCard))
-	}
-	children = append(children, layout.Rigid(spacer(20)))
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
-}
-
-func (w *Window) header(gtx layout.Context) layout.Dimensions {
-	pageIndex := w.activePage
-	if pageIndex < 0 || pageIndex >= len(workspacePages) {
-		pageIndex = pageSettings
-	}
-	page := workspacePages[pageIndex]
-	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layout.Rigid(label(w.theme, page.Title, 24, palette.text).Layout), layout.Rigid(label(w.theme, page.Subtitle, 14, palette.muted).Layout))
-		}),
-		layout.Rigid(secondaryButton(w.theme, &w.resetButton, "Reset")), layout.Rigid(spacerX(10)), layout.Rigid(primaryButton(w.theme, &w.captureButton, "Get server capabilities")), layout.Rigid(spacerX(10)), layout.Rigid(primaryButton(w.theme, &w.runButton, "Run automation")), layout.Rigid(spacerX(10)), layout.Rigid(secondaryButton(w.theme, &w.cancelButton, "Cancel")),
-	)
-}
-
-func (w *Window) settingsCard(gtx layout.Context) layout.Dimensions {
-	return card(gtx, func(gtx layout.Context) layout.Dimensions {
-		gtx.Constraints.Max.X = minInt(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(900)))
-		w.mu.Lock()
-		serverStatus := w.serverTestStatus
-		w.mu.Unlock()
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return formPanel(gtx, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-						layout.Rigid(label(w.theme, "Server connection", 24, palette.text).Layout),
-						layout.Rigid(spacer(6)),
-						layout.Rigid(label(w.theme, "Enter the Fiery server details used for discovery and automation.", 14, palette.muted).Layout),
-						layout.Rigid(spacer(22)),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return row(gtx,
-								fieldBox(w.theme, "Server IP address", "Example: 10.220.129.85", &w.serverIP, 390),
-								fieldBox(w.theme, "Admin password", "Administrator password", &w.password, 390),
-							)
-						}),
-						layout.Rigid(spacer(16)),
-						layout.Rigid(fieldBox(w.theme, "Secret key", "Fiery API access key", &w.secretKey, 794)),
-						layout.Rigid(spacer(18)),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return row(gtx, primaryButton(w.theme, &w.testServerButton, "Test server connection"), statusBadge(w.theme, serverStatus, serverStatusColor(serverStatus)))
-						}),
-					)
-				})
-			}),
-			layout.Rigid(spacer(22)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return formPanel(gtx, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-						layout.Rigid(label(w.theme, "Test File Setup", 24, palette.text).Layout),
-						layout.Rigid(spacer(6)),
-						layout.Rigid(label(w.theme, "Choose the files to import during automation.", 14, palette.muted).Layout),
-						layout.Rigid(spacer(22)),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return row(gtx, fieldBox(w.theme, "Folder path", "Folder containing test files", &w.folderPath, 640), browseButton(w.theme, &w.browseFolderButton, "Browse folder"))
-						}),
-						layout.Rigid(spacer(16)),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return row(gtx, fieldBox(w.theme, "Specific file path", "Optional single PDF/job file", &w.filePath, 640), browseButton(w.theme, &w.browseFileButton, "Browse file"))
-						}),
-						layout.Rigid(spacer(18)),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return row(gtx, fieldBox(w.theme, "Parallel jobs (1-1000)", "1", &w.workers, 180))
-						}),
-						layout.Rigid(spacer(22)),
-						layout.Rigid(w.fileSelectionRadioGroup),
-						layout.Rigid(spacer(18)),
-						layout.Rigid(w.runModeRadioGroup),
-					)
-				})
-			}),
-		)
-	})
-}
 func (w *Window) fileSelectionRadioGroup(gtx layout.Context) layout.Dimensions {
 	return radioGroup(gtx, w.theme, "File selection", "Choose how files are picked for this run.", []radioOption{
 		{Key: "all", Label: "All files in folder"},
@@ -719,54 +749,6 @@ func radioGroup(gtx layout.Context, th *material.Theme, title, subtitle string, 
 	})
 }
 
-func (w *Window) capabilitiesCard(gtx layout.Context) layout.Dimensions {
-	w.mu.Lock()
-	model := w.capabilities
-	active := w.captureActive
-	w.mu.Unlock()
-	return card(gtx, func(gtx layout.Context) layout.Dimensions {
-		if len(model.Options) == 0 && len(model.Queues) == 0 && len(model.ServerPresets) == 0 {
-			children := []layout.FlexChild{layout.Rigid(sectionTitle(w.theme, "Server capabilities")), layout.Rigid(spacer(10))}
-			if active {
-				children = append(children, layout.Rigid(w.captureProgressPanel), layout.Rigid(spacer(10)))
-			}
-			children = append(children, layout.Rigid(label(w.theme, "Click Get server capabilities. Options will appear here after the server responds.", 14, palette.muted).Layout))
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
-		}
-		children := []layout.FlexChild{layout.Rigid(sectionTitle(w.theme, fmt.Sprintf("Server capabilities · %s", fallback(model.ServerName, "discovered")))), layout.Rigid(spacer(10))}
-		if active {
-			children = append(children, layout.Rigid(w.captureProgressPanel), layout.Rigid(spacer(10)))
-		}
-		children = append(children,
-			layout.Rigid(w.capabilityToolbar), layout.Rigid(spacer(10)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.categoryTabs(gtx, model) }), layout.Rigid(spacer(10)),
-			layout.Rigid(w.presetPanel), layout.Rigid(spacer(10)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.serverPresetPanel(gtx, model) }), layout.Rigid(spacer(10)),
-			layout.Rigid(w.strategySelector), layout.Rigid(spacer(12)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionGrid(gtx, model) }),
-		)
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
-	})
-}
-
-func (w *Window) captureProgressPanel(gtx layout.Context) layout.Dimensions {
-	w.mu.Lock()
-	phase := w.capturePhase
-	progress := w.captureProgress
-	w.mu.Unlock()
-	if phase == "" {
-		phase = "Getting capabilities from server..."
-	}
-	bar := material.ProgressBar(w.theme, progress)
-	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(label(w.theme, phase, 14, palette.primary).Layout),
-			layout.Rigid(spacer(8)),
-			layout.Rigid(bar.Layout),
-		)
-	})
-}
-
 func (w *Window) capabilityToolbar(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Alignment: layout.End}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -777,47 +759,73 @@ func (w *Window) capabilityToolbar(gtx layout.Context) layout.Dimensions {
 			w.mu.Lock()
 			model := w.capabilities
 			w.mu.Unlock()
-			return label(w.theme, fmt.Sprintf("%d features · %d constrained", len(model.Options), capabilities.ConstraintCount(model)), 13, palette.muted).Layout(gtx)
+			return label(w.theme, fmt.Sprintf("%d applicable properties · %d excluded entries · %d incompatible values removed · %d constrained", len(model.Options), len(model.ExcludedOptions), len(model.ExcludedValues), capabilities.ConstraintCount(model)), 13, palette.muted).Layout(gtx)
 		}),
 	)
 }
 
 func (w *Window) categoryTabs(gtx layout.Context, model capabilities.Model) layout.Dimensions {
-	names := capabilities.CategoryNames(model)
-	if len(names) == 0 {
+	groups := capabilities.GroupedOptions(model)
+	if len(groups) == 0 {
 		return layout.Dimensions{}
 	}
 	available := false
-	for _, name := range names {
-		if name == w.activeCapabilityGroup {
+	for _, group := range groups {
+		if group.Name == w.activeCapabilityGroup {
 			available = true
 			break
 		}
 	}
 	if !available {
-		w.activeCapabilityGroup = names[0]
+		w.activeCapabilityGroup = groups[0].Name
 	}
-	// Color and Image are separate PDF-defined headings. Two bounded rows keep
-	// every category readable without horizontal scrolling or clipped labels.
-	const tabsPerRow = 5
-	rows := make([]layout.FlexChild, 0, (len(names)+tabsPerRow-1)/tabsPerRow)
-	for start := 0; start < len(names); start += tabsPerRow {
-		end := minInt(start+tabsPerRow, len(names))
-		rowNames := append([]string(nil), names[start:end]...)
-		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			children := make([]layout.FlexChild, 0, len(rowNames))
-			for _, categoryName := range rowNames {
-				name := categoryName
-				button := w.categoryButton(name)
-				shortName := strings.TrimSuffix(strings.TrimSuffix(name, " options"), " / Advanced")
-				children = append(children, layout.Flexed(1, toggle(w.theme, button, shortName, w.activeCapabilityGroup == name)))
+	// Keep categories in one fixed-height row. Compact, fixed-width tabs avoid
+	// the previous oversized wrapping layout; narrow windows scroll horizontally.
+	listStyle := material.List(w.theme, &w.categoryList)
+	listStyle.ScrollbarStyle.Track.Color = withAlpha(palette.primaryDim, 120)
+	listStyle.ScrollbarStyle.Indicator.Color = withAlpha(palette.primary, 180)
+	return listStyle.Layout(gtx, len(groups), func(gtx layout.Context, index int) layout.Dimensions {
+		group := groups[index]
+		button := w.categoryButton(group.Name)
+		count := w.selectedCountForGroup(group)
+		caption := compactCategoryLabel(group.Name)
+		if count > 0 {
+			caption += fmt.Sprintf("  %d", count)
+		}
+		return layout.Inset{Right: unit.Dp(6), Bottom: unit.Dp(5)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			width := gtx.Dp(unit.Dp(126))
+			gtx.Constraints.Min.X, gtx.Constraints.Max.X = width, width
+			return toggle(w.theme, button, caption, w.activeCapabilityGroup == group.Name)(gtx)
+		})
+	})
+}
+
+func compactCategoryLabel(name string) string {
+	switch name {
+	case "Substrate / Media":
+		return "Media"
+	case "Installable options":
+		return "Installable"
+	case "Other / Advanced":
+		return "More"
+	default:
+		return name
+	}
+}
+
+func (w *Window) selectedCountForGroup(group capabilities.OptionGroup) int {
+	count := 0
+	for _, option := range group.Options {
+		if input := w.numericInputs[option.ID]; input != nil && strings.TrimSpace(input.Text()) != "" {
+			count++
+		}
+		for _, selected := range w.selected[option.ID] {
+			if selected != nil && selected.Value {
+				count++
 			}
-			return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
-			})
-		}))
+		}
 	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+	return count
 }
 
 func (w *Window) categoryButton(name string) *widget.Clickable {
@@ -840,7 +848,7 @@ func (w *Window) presetPanel(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(label(w.theme, "Reusable settings preset", 15, palette.text).Layout),
 			layout.Rigid(spacer(3)),
-			layout.Rigid(label(w.theme, "Presets save selections, numeric inputs, strategy, workers, and run modes. Credentials and file paths are never saved.", 12, palette.muted).Layout),
+			layout.Rigid(label(w.theme, "Presets save Job Property selections, numeric inputs, value source, test intent, generation, workers, and run modes. Credentials and file paths are never saved.", 12, palette.muted).Layout),
 			layout.Rigid(spacer(7)),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return row(gtx,
@@ -857,7 +865,18 @@ func (w *Window) presetPanel(gtx layout.Context) layout.Dimensions {
 }
 
 func (w *Window) strategySelector(gtx layout.Context) layout.Dimensions {
-	return row(gtx, toggle(w.theme, &w.selectedOnlyButton, "Selected only", w.strategy == combinations.StrategySelected), toggle(w.theme, &w.allPermButton, "All permutations", w.strategy == combinations.StrategyAll), toggle(w.theme, &w.pairwiseButton, "Pairwise", w.strategy == combinations.StrategyPairwise), field(w.theme, "Max cases", &w.maxCases, 110), browseButton(w.theme, &w.apiTraceButton, "Capture API trace"))
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return row(gtx,
+				toggle(w.theme, &w.singleStrategyButton, "Single Configuration", w.strategy == combinations.StrategySingle),
+				toggle(w.theme, &w.allPermButton, "All Combinations", w.strategy == combinations.StrategyAll || w.strategy == combinations.StrategySelected),
+				toggle(w.theme, &w.pairwiseButton, "Pairwise", w.strategy == combinations.StrategyPairwise),
+				toggle(w.theme, &w.randomStrategyButton, "Bounded Random Sample", w.strategy == combinations.StrategyRandom),
+			)
+		}),
+		layout.Rigid(spacer(10)),
+		layout.Rigid(field(w.theme, "Max cases (1–10,000)", &w.maxCases, 180)),
+	)
 }
 
 func (w *Window) optionGrid(gtx layout.Context, model capabilities.Model) layout.Dimensions {
@@ -1015,7 +1034,7 @@ func (w *Window) optionRow(gtx layout.Context, opt capabilities.Option) layout.D
 	// to an arbitrary subset of the server's values.
 	values := optionValues(opt)
 	ensureBools(w.selected, opt.ID, values)
-	defaultValue := fallback(opt.Value, "not reported")
+	defaultValue := fallback(displayOptionValue(opt.ID, opt.Value), "not reported")
 	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
 		metadata := fmt.Sprintf("%s · %d value(s) · default: %s", opt.ID, len(values), defaultValue)
 		if len(opt.Constraints) > 0 {
@@ -1030,8 +1049,8 @@ func (w *Window) optionRow(gtx layout.Context, opt capabilities.Option) layout.D
 		for _, value := range values {
 			value := value
 			checkbox := w.selected[opt.ID][value]
-			displayValue := value
-			if value == opt.Value {
+			displayValue := displayOptionValue(opt.ID, value)
+			if optionValueMatches(opt.ID, value, opt.Value) {
 				displayValue += "  · default"
 			}
 			items = append(items, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1097,11 +1116,14 @@ func (w *Window) headerCheckbox(store map[string]*widget.Bool, key string) *widg
 func (w *Window) pageRangeOptionRow(gtx layout.Context, opt capabilities.Option) layout.Dimensions {
 	values := checkboxOptionValues(opt)
 	ensureBools(w.selected, opt.ID, values)
+	w.mu.Lock()
+	customSupported := customPageRangeSupported(w.capabilities)
+	w.mu.Unlock()
 	return surfaceAlt(gtx, func(gtx layout.Context) layout.Dimensions {
 		items := []layout.FlexChild{
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return w.optionHeader(gtx, opt, values) }),
 			layout.Rigid(spacer(3)),
-			layout.Rigid(label(w.theme, fmt.Sprintf("%s · modes: All, Odd, Even · default: %s", opt.ID, fallback(opt.Value, "not reported")), 12, palette.muted).Layout),
+			layout.Rigid(label(w.theme, fmt.Sprintf("%s · server-advertised values · default: %s", opt.ID, fallback(opt.Value, "not reported")), 12, palette.muted).Layout),
 			layout.Rigid(spacer(7)),
 		}
 		for _, value := range values {
@@ -1119,14 +1141,26 @@ func (w *Window) pageRangeOptionRow(gtx layout.Context, opt capabilities.Option)
 				})
 			}))
 		}
-		items = append(items,
-			layout.Rigid(spacer(5)),
-			layout.Rigid(label(w.theme, "Custom page range", 14, palette.text).Layout),
-			layout.Rigid(spacer(3)),
-			layout.Rigid(label(w.theme, "Enter pages like Copies: 1,3,5-8 or 5 to 8. The range is one page-selection setting and is validated against each imported file's original page count. Leave blank to omit it.", 13, palette.muted).Layout),
-			layout.Rigid(spacer(7)),
-			layout.Rigid(fieldBox(w.theme, "Custom page range", "1,3,5-8", &w.pageRangeInput, 620)),
-		)
+		items = append(items, layout.Rigid(spacer(5)))
+		if customSupported {
+			items = append(items,
+				layout.Rigid(label(w.theme, "Custom page range", 14, palette.text).Layout),
+				layout.Rigid(spacer(3)),
+				layout.Rigid(label(w.theme, "Enter pages like 1,3,5-8 or 5 to 8. The text is validated against each imported file's original page count and sent directly as EFPageRange. DPP_PAGE_RANGE is never sent.", 13, palette.muted).Layout),
+				layout.Rigid(spacer(7)),
+				layout.Rigid(fieldBox(w.theme, "Custom page range", "1,3,5-8", &w.pageRangeInput, 620)),
+			)
+		} else {
+			items = append(items,
+				layout.Rigid(label(w.theme, "Custom page range", 14, palette.text).Layout),
+				layout.Rigid(spacer(3)),
+				layout.Rigid(label(w.theme, "Disabled: this Fiery does not advertise a range-capable EFPageRange value. Exact advertised values remain available and the app will not send DPP_PAGE_RANGE.", 13, palette.muted).Layout),
+				layout.Rigid(spacer(7)),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return fieldBox(w.theme, "Custom page range (not supported)", "Unavailable on this Fiery", &w.pageRangeInput, 620)(gtx.Disabled())
+				}),
+			)
+		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, items...)
 	})
 }
@@ -1184,6 +1218,14 @@ func isCopiesOption(optionID string) bool {
 
 func isPageRangeOption(optionID string) bool {
 	return strings.EqualFold(strings.TrimSpace(optionID), pageRangeOptionID)
+}
+
+func customPageRangeSupported(model capabilities.Model) bool {
+	option, exists := model.OptionByID(pageRangeOptionID)
+	// This Fiery's range-capable schema advertises Range1 and CWS materializes
+	// arbitrary selections such as 5-10 directly in EFPageRange. Do not enable
+	// free-form text on servers that advertise only All/Odd/Even semantics.
+	return exists && containsStringFold(option.Values, pageRangeRangeValue)
 }
 
 func (w *Window) resultsCard(gtx layout.Context) layout.Dimensions {
@@ -1297,11 +1339,16 @@ func (w *Window) testServerConnection() {
 		w.setStatus("Wait for the server administration operation to finish before testing the connection.")
 		return
 	}
-	server, ok := w.server()
+	server, ok := w.connectionDraft()
 	if !ok {
 		w.setServerTestStatus("Missing server details")
 		return
 	}
+	testedKey := connectionKey(server)
+	w.mu.Lock()
+	w.serverTestOK = false
+	w.testedConnectionKey = ""
+	w.mu.Unlock()
 	if !w.testingServer.CompareAndSwap(false, true) {
 		return
 	}
@@ -1313,19 +1360,31 @@ func (w *Window) testServerConnection() {
 		defer cancel()
 		client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
 		if err != nil {
+			w.mu.Lock()
+			w.serverTestOK = false
+			w.testedConnectionKey = ""
+			w.mu.Unlock()
 			w.setServerTestStatus("Connection failed")
 			w.setStatus("Server test failed: " + err.Error())
 			w.addLog("Server connection test failed: %v", err)
 			return
 		}
 		if _, err := client.Login(ctx); err != nil {
+			w.mu.Lock()
+			w.serverTestOK = false
+			w.testedConnectionKey = ""
+			w.mu.Unlock()
 			w.setServerTestStatus("Authentication failed")
 			w.setStatus("Server test failed: " + err.Error())
 			w.addLog("Server connection test failed: %v", err)
 			return
 		}
-		w.setServerTestStatus("Connection OK")
-		w.setStatus("Server connection OK")
+		w.mu.Lock()
+		w.serverTestOK = true
+		w.testedConnectionKey = testedKey
+		w.mu.Unlock()
+		w.setServerTestStatus("Connection OK · press OK to apply")
+		w.setStatus("Server connection passed. Press OK to use this connection.")
 		w.addLog("Server connection test passed for %s", server.IPAddress)
 	})
 }
@@ -1551,6 +1610,12 @@ func (w *Window) captureCapabilities() {
 		} else {
 			w.addLog("Saved environment snapshot: %s", environmentPath)
 		}
+		normalizedPath, normalizedErr := capabilities.SaveNormalizationReport(model, snap.CapturedAt, captureDirectory())
+		if normalizedErr != nil {
+			w.addLog("Normalized capability decision report save failed: %s", normalizedErr)
+		} else {
+			w.addLog("Saved normalized capability decision report: %s", normalizedPath)
+		}
 		w.mu.Lock()
 		w.capabilities = model
 		w.mu.Unlock()
@@ -1580,13 +1645,132 @@ func (w *Window) setCaptureProgress(active bool, progress float32, phase string)
 
 func (w *Window) logCapabilitySummary(model capabilities.Model) {
 	groups := capabilities.GroupedOptions(model)
-	w.addLog("Discovered server %s serial=%s version=%s queues=%d server_presets=%d options=%d groups=%d", fallback(model.ServerName, "unknown"), fallback(model.SerialNumber, "unknown"), fallback(model.Version, "unknown"), len(model.Queues), len(model.ServerPresets), len(model.Options), len(groups))
+	w.addLog("Discovered server %s press=%s serial=%s version=%s queues=%d server_presets=%d applicable_options=%d excluded_schema_entries=%d groups=%d", fallback(model.ServerName, "unknown"), fallback(model.PressModel, "unknown"), fallback(model.SerialNumber, "unknown"), fallback(model.Version, "unknown"), len(model.Queues), len(model.ServerPresets), len(model.Options), len(model.ExcludedOptions), len(groups))
+	w.logCapabilityFilterAudit(model)
+	w.logExcludedCapabilitySummary(model.ExcludedOptions, model.ExcludedValues)
 	for _, group := range groups {
 		keys := make([]string, 0, len(group.Options))
 		for _, opt := range group.Options {
 			keys = append(keys, fmt.Sprintf("%s(%d)", opt.ID, len(optionValues(opt))))
 		}
 		w.addLog("Capability group %s: %s", group.Name, strings.Join(keys, ", "))
+	}
+	if _, hasPageRange := model.OptionByID(pageRangeOptionID); hasPageRange {
+		if customPageRangeSupported(model) {
+			w.addLog("Custom page-range text enabled: normalized expressions are sent directly as %s; %s is never emitted", pageRangeOptionID, pageRangeLegacyDataID)
+		} else {
+			w.addLog("Custom page-range text disabled: %s does not advertise %s; exact advertised values remain available and %s will not be emitted", pageRangeOptionID, pageRangeRangeValue, pageRangeLegacyDataID)
+		}
+	}
+	w.logCriticalCapabilityDiagnostics(model)
+}
+
+func (w *Window) logCapabilityFilterAudit(model capabilities.Model) {
+	audit := capabilities.BuildFilterAudit(model)
+	summary := audit.Summary
+	w.diagnostic.printf("CAPABILITY_FILTER_AUDIT: schema=%d raw=%d included=%d included_server=%d synthetic=%d displayed=%d excluded=%d excluded_values=%d constrained=%d", capabilities.NormalizationReportSchemaVersion, summary.RawServerProperties, summary.IncludedProperties, summary.IncludedServerProperties, summary.SyntheticProperties, summary.DisplayedProperties, summary.ExcludedProperties, summary.ExcludedValues, summary.ConstrainedProperties)
+	for _, decision := range audit.DisplayedOptions {
+		option := decision.Property
+		w.diagnostic.printf("CAPABILITY_UI_DECISION: decision=included category=%q section=%q id=%s label=%q group=%q ppdtype=%q default=%q values=%q scopes=%q synthetic=%t reason=%q", decision.Category, decision.Section, option.ID, option.Label, option.Group, option.PPDType, option.Value, option.Values, option.Scopes, option.Synthetic, decision.InclusionReason)
+	}
+	for _, excluded := range model.ExcludedOptions {
+		option := excluded.Property
+		availability := "unspecified"
+		if option.Available != nil {
+			availability = strconv.FormatBool(*option.Available)
+		}
+		w.diagnostic.printf("CAPABILITY_UI_DECISION: decision=excluded id=%s label=%q group=%q ppdtype=%q default=%q values=%q scopes=%q editable=%t editableSpecified=%t available=%s hidden=%t reason=%q", excluded.ID, option.Label, option.Group, option.PPDType, option.Value, option.Values, option.Scopes, option.Editable, option.EditableSpecified, availability, option.Hidden, excluded.Reason)
+	}
+	for _, excluded := range model.ExcludedValues {
+		w.diagnostic.printf("CAPABILITY_VALUE_DECISION: decision=excluded id=%s value=%q reason=%q", excluded.OptionID, excluded.Value, excluded.Reason)
+	}
+}
+
+func (w *Window) logExcludedCapabilitySummary(excluded []capabilities.ExcludedOption, excludedValues []capabilities.ExcludedValue) {
+	if len(excluded) == 0 && len(excludedValues) == 0 {
+		return
+	}
+	byReason := make(map[string][]string)
+	for _, option := range excluded {
+		byReason[option.Reason] = append(byReason[option.Reason], option.ID)
+	}
+	reasons := make([]string, 0, len(byReason))
+	for reason := range byReason {
+		reasons = append(reasons, reason)
+	}
+	sort.Strings(reasons)
+	for _, reason := range reasons {
+		ids := byReason[reason]
+		sort.Strings(ids)
+		displayed := ids
+		if len(displayed) > 24 {
+			displayed = append(append([]string(nil), displayed[:24]...), fmt.Sprintf("… and %d more", len(ids)-24))
+		}
+		w.addLog("Excluded %d non-applicable property schema item(s): %s · IDs: %s", len(ids), reason, strings.Join(displayed, ", "))
+	}
+	byOption := make(map[string][]string)
+	for _, value := range excludedValues {
+		byOption[value.OptionID] = append(byOption[value.OptionID], value.Value)
+	}
+	optionIDs := make([]string, 0, len(byOption))
+	for optionID := range byOption {
+		optionIDs = append(optionIDs, optionID)
+	}
+	sort.Strings(optionIDs)
+	for _, optionID := range optionIDs {
+		values := byOption[optionID]
+		sort.Strings(values)
+		w.addLog("Removed %d value(s) from %s because they conflict with the installed server configuration: %s", len(values), optionID, strings.Join(values, ", "))
+	}
+}
+
+func (w *Window) logCriticalCapabilityDiagnostics(model capabilities.Model) {
+	for _, optionID := range []string{outputProfileOptionID, pageRangeOptionID, pageRangeLegacyDataID} {
+		if option, ok := model.OptionByID(optionID); ok {
+			quotedValues := make([]string, 0, len(option.Values))
+			for _, value := range option.Values {
+				quotedValues = append(quotedValues, strconv.QuoteToASCII(value))
+			}
+			w.diagnostic.printf("CAPABILITY_DECISION: id=%s decision=included group=%q ppdtype=%q editable=%t editableSpecified=%t hidden=%t scopes=%q default=%s values=[%s]", option.ID, option.Group, option.PPDType, option.Editable, option.EditableSpecified, option.Hidden, option.Scopes, strconv.QuoteToASCII(option.Value), strings.Join(quotedValues, ","))
+			continue
+		}
+		excluded := false
+		for _, decision := range model.ExcludedOptions {
+			if !strings.EqualFold(decision.ID, optionID) {
+				continue
+			}
+			excluded = true
+			property := decision.Property
+			w.diagnostic.printf("CAPABILITY_DECISION: id=%s decision=excluded reason=%q group=%q ppdtype=%q editable=%t editableSpecified=%t hidden=%t scopes=%q default=%s", decision.ID, decision.Reason, property.Group, property.PPDType, property.Editable, property.EditableSpecified, property.Hidden, property.Scopes, strconv.QuoteToASCII(property.Value))
+			break
+		}
+		if !excluded {
+			w.diagnostic.printf("CAPABILITY_DECISION: id=%s decision=not-advertised", optionID)
+		}
+	}
+}
+
+func (w *Window) logCriticalAttributeWire(jobID string, attributes map[string]string) {
+	if value, exists := attributes[pageRangeOptionID]; exists {
+		_, parseErr := pagevalues.Parse(value, pagevalues.DefaultExpansionLimit)
+		_, legacyPresent := attributes[pageRangeLegacyDataID]
+		w.diagnostic.printf("PAGE_RANGE_WIRE: job=%s carrier=%s custom=%t legacy_companion=%s present=%t", jobID, pageRangeOptionID, parseErr == nil, pageRangeLegacyDataID, legacyPresent)
+	}
+	for _, optionID := range []string{outputProfileOptionID, pageRangeOptionID, pageRangeLegacyDataID} {
+		value, exists := attributes[optionID]
+		if !exists {
+			continue
+		}
+		leading := "none"
+		for _, r := range value {
+			leading = fmt.Sprintf("U+%04X", r)
+			break
+		}
+		prefix := []byte(value)
+		if len(prefix) > 12 {
+			prefix = prefix[:12]
+		}
+		w.diagnostic.printf("ATTRIBUTE_WIRE: job=%s key=%s leading=%s utf8Prefix=% X bytes=%d value=%s", jobID, optionID, leading, prefix, len([]byte(value)), strconv.QuoteToASCII(value))
 	}
 }
 
@@ -1730,6 +1914,7 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 			return report
 		}
 	}
+	w.logCriticalAttributeWire(imp.JobID, attrs)
 	if err := client.UpdateJobAttributes(ctx, session, imp.JobID, attrs); err != nil {
 		report.Error = err.Error()
 		capture("update failed")
@@ -1816,13 +2001,29 @@ func (w *Window) startRun() {
 		w.setStatus("Server preset selection is invalid: " + err.Error())
 		return
 	}
+	intent := w.testIntent
+	if intent == "" {
+		intent = testIntentPositive
+	}
+	constraintMode := w.constraintMode
+	if constraintMode == "" {
+		constraintMode = constraintValidationOnly
+	}
+	if w.valueSource == valueSourceBaseline || (intent == testIntentConstraint && constraintMode == constraintValidationOnly) {
+		serverPreset = nil
+	}
 	w.logSelectedCombinations(combos, axes)
 	modes := w.selectedRunModes()
 	if len(modes) == 0 {
 		w.setStatus("Select at least one run mode.")
 		return
 	}
-	if combinationsRequireRipReadback(combos) && !runModesIncludeAction(modes, "rip") {
+	if intent == testIntentConstraint {
+		// Constraint verdicts are evaluated on a dedicated disposable held job;
+		// lifecycle modes must not multiply or process intentionally invalid cases.
+		modes = []runMode{runModes[0]}
+	}
+	if intent == testIntentPositive && combinationsRequireRipReadback(combos) && !runModesIncludeAction(modes, "rip") {
 		w.setStatus("Selected capabilities require RIP before strict verification. Select Process and Hold or RIP run mode.")
 		return
 	}
@@ -1864,12 +2065,15 @@ func (w *Window) startRun() {
 		ConstraintSkipped: w.constraintSkipped,
 		PlannedTests:      plannedTests,
 		Workers:           workers,
-		Strategy:          string(w.strategy),
+		Strategy:          fmt.Sprintf("%s · %s · %s", strategyLabel(w.strategy), valueSourceLabel(w.valueSource), testIntentLabel(intent)),
 		ServerPreset:      serverPresetDescription(serverPreset),
 		RunModes:          runModeLabels(modes),
 	}
 	w.results = nil
 	w.resultCount = 0
+	w.passedCount = 0
+	w.failedCount = 0
+	w.errorCount = 0
 	w.mu.Unlock()
 	if previousStore != nil {
 		if err := previousStore.Close(); err != nil {
@@ -1880,11 +2084,11 @@ func (w *Window) startRun() {
 	w.cancel = cancel
 	w.setStatus("Running automation...")
 	w.launchBackground("Automation run", func() {
-		w.runAutomation(ctx, server, selectedFiles, workers, combos, modes, serverPreset)
+		w.runAutomation(ctx, server, selectedFiles, workers, combos, modes, serverPreset, intent, constraintMode)
 	})
 }
 
-func (w *Window) runAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, combos []combinations.Combination, modes []runMode, serverPreset *fiery.ServerPreset) {
+func (w *Window) runAutomation(ctx context.Context, server model.ServerConnection, selectedFiles []string, workers int, combos []combinations.Combination, modes []runMode, serverPreset *fiery.ServerPreset, intent automationTestIntent, constraintMode constraintTestMode) {
 	finalStatus := "Failed"
 	defer func() {
 		finalizeErr := w.finishRun(finalStatus)
@@ -1924,7 +2128,7 @@ func (w *Window) runAutomation(ctx context.Context, server model.ServerConnectio
 		go func() {
 			defer wg.Done()
 			for job := range jobs {
-				w.executeJobSafely(ctx, client, session, job.file, job.attrs, job.mode, serverPreset)
+				w.executeJobSafely(ctx, client, session, job.file, job.attrs, job.mode, serverPreset, intent, constraintMode)
 			}
 		}()
 	}
@@ -1958,7 +2162,7 @@ func (w *Window) runAutomation(ctx context.Context, server model.ServerConnectio
 	w.setStatus("Finalizing automation results...")
 }
 
-func (w *Window) executeJobSafely(ctx context.Context, client *fiery.Client, session fiery.Session, file string, attrs map[string]string, mode runMode, serverPreset *fiery.ServerPreset) {
+func (w *Window) executeJobSafely(ctx context.Context, client *fiery.Client, session fiery.Session, file string, attrs map[string]string, mode runMode, serverPreset *fiery.ServerPreset, intent automationTestIntent, constraintMode constraintTestMode) {
 	result := reportxlsx.Result{JobName: filepath.Base(file), Mode: mode.Label, SetValues: cloneStringMap(attrs)}
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -1970,10 +2174,10 @@ func (w *Window) executeJobSafely(ctx context.Context, client *fiery.Client, ses
 			w.addResult(result)
 		}
 	}()
-	w.executeJob(ctx, client, session, file, attrs, mode, serverPreset, &result)
+	w.executeJob(ctx, client, session, file, attrs, mode, serverPreset, intent, constraintMode, &result)
 }
 
-func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session fiery.Session, file string, attrs map[string]string, mode runMode, serverPreset *fiery.ServerPreset, result *reportxlsx.Result) {
+func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session fiery.Session, file string, attrs map[string]string, mode runMode, serverPreset *fiery.ServerPreset, intent automationTestIntent, constraintMode constraintTestMode, result *reportxlsx.Result) {
 	start := time.Now()
 	finish := func(status, detail string, got map[string]string) {
 		result.Result = status
@@ -2030,6 +2234,12 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		}
 		w.addLog("Fiery server preset %s was accepted for job %s", serverPresetDescription(serverPreset), imp.JobID)
 	}
+	if intent == testIntentConstraint {
+		status, detail, got := w.executeConstraintCase(ctx, client, session, imp.JobID, attrs, constraintMode, spooled)
+		result.Lifecycle = detail
+		finish(status, detail, got)
+		return
+	}
 	if len(attrs) > 0 {
 		w.mu.Lock()
 		capabilityModel := w.capabilities
@@ -2053,6 +2263,7 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 			}
 		}
 		w.addLog("Setting job %s attributes after done spooling: %s", imp.JobID, formatAttributes(attrs))
+		w.logCriticalAttributeWire(imp.JobID, attrs)
 		if err := client.UpdateJobAttributes(ctx, session, imp.JobID, attrs); err != nil {
 			finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
 			return
@@ -2075,7 +2286,7 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 			return
 		}
 		for key, want := range attrs {
-			if !w.attributeMapValueMatches(got, key, want) {
+			if !w.expectedAttributeMatches(got, attrs, key, want) {
 				finish("FAIL", fmt.Sprintf("mode=%s: job deleted, but pre-delete verification failed for %s set=%q got=%q", mode.Label, key, want, got[key]), got)
 				return
 			}
@@ -2110,7 +2321,7 @@ func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session f
 		detail = fmt.Sprintf("mode=%s: lifecycle passed (%s); no job attributes were selected for set/get verification", mode.Label, outcome.Summary())
 	}
 	for k, v := range attrs {
-		if !w.attributeMapValueMatches(got, k, v) {
+		if !w.expectedAttributeMatches(got, attrs, k, v) {
 			status = "FAIL"
 			detail = fmt.Sprintf("mode=%s: %s set=%q got=%q status=%q state=%q display=%q recent=%q related=%s availableKeys=%s", mode.Label, k, v, got[k], got["status"], got["state"], got["display status"], got["recent action"], relatedReadbackValues(got), short(strings.Join(sortedKeys(got), ","), 220))
 			if requiresRipReadback(k) && !modeIncludesAction(mode, "rip") {
@@ -2221,13 +2432,12 @@ func (w *Window) logRawPostmanComparison(ctx context.Context, client *fiery.Clie
 }
 
 func validateCustomPageRange(attributes, jobAttributes map[string]string) error {
-	expression := strings.TrimSpace(attributes[pageRangeDataID])
-	if expression == "" {
-		return nil
-	}
+	expression := strings.TrimSpace(attributes[pageRangeOptionID])
 	selection, err := pagevalues.Parse(expression, pagevalues.DefaultExpansionLimit)
 	if err != nil {
-		return err
+		// All, Odd, Even, Range1, and any other exact server-advertised menu
+		// values are not arbitrary page expressions and need no page-count check.
+		return nil
 	}
 	pageCount, ok := importedFilePageCount(jobAttributes)
 	if !ok {
@@ -2248,26 +2458,39 @@ func importedFilePageCount(attributes map[string]string) (int, bool) {
 
 func (w *Window) attributesMatch(got, expected map[string]string) bool {
 	for key, want := range expected {
-		if !w.attributeMapValueMatches(got, key, want) {
+		if !w.expectedAttributeMatches(got, expected, key, want) {
 			return false
 		}
 	}
 	return true
 }
 
+func (w *Window) expectedAttributeMatches(got, _ map[string]string, key, want string) bool {
+	return w.attributeMapValueMatches(got, key, want)
+}
+
 func (w *Window) attributeMapValueMatches(got map[string]string, key, want string) bool {
-	if strings.EqualFold(key, pageRangeDataID) {
-		return pagevalues.Equivalent(got[key], want)
-	}
-	if strings.EqualFold(key, pageRangeOptionID) && strings.EqualFold(want, pageRangeCustomServerValue) && strings.TrimSpace(got[key]) == "" {
-		// Some Fiery job GET variants expose only DPP_PAGE_RANGE for a custom
-		// range. A non-empty, separately verified DPP value proves Range1 mode.
-		return strings.TrimSpace(got[pageRangeDataID]) != ""
+	if strings.EqualFold(key, pageRangeOptionID) {
+		if _, err := pagevalues.Parse(want, pagevalues.DefaultExpansionLimit); err == nil {
+			return pageRangeValueMatches(got, want)
+		}
 	}
 	return w.attributeValueMatches(key, got[key], want)
 }
 
+func pageRangeValueMatches(got map[string]string, want string) bool {
+	value := strings.TrimSpace(got[pageRangeOptionID])
+	if _, err := pagevalues.Parse(value, pagevalues.DefaultExpansionLimit); err != nil {
+		return false
+	}
+	return pagevalues.Equivalent(value, want)
+}
+
 func (w *Window) attributeValueMatches(key, got, want string) bool {
+	if strings.EqualFold(key, outputProfileOptionID) {
+		got = normalizeOutputProfileValue(got)
+		want = normalizeOutputProfileValue(want)
+	}
 	if got == want {
 		return true
 	}
@@ -2528,10 +2751,21 @@ func relatedReadbackMap(attrs map[string]string) map[string]string {
 	return out
 }
 
-func (w *Window) server() (model.ServerConnection, bool) {
-	s := model.ServerConnection{IPAddress: strings.TrimSpace(w.serverIP.Text()), SecretKey: strings.TrimSpace(w.secretKey.Text()), Password: strings.TrimSpace(w.password.Text())}
+func (w *Window) connectionDraft() (model.ServerConnection, bool) {
+	s := w.draftConnectionUnchecked()
 	if s.IPAddress == "" || s.SecretKey == "" || s.Password == "" {
-		w.setStatus("Server IP, secret key, and admin password are required.")
+		w.setStatus("Server address, configured or replacement secret key, and administrator password are required.")
+		return model.ServerConnection{}, false
+	}
+	return s, true
+}
+
+func (w *Window) server() (model.ServerConnection, bool) {
+	w.mu.Lock()
+	s, ok := w.activeServer, w.hasActiveServer
+	w.mu.Unlock()
+	if !ok {
+		w.setStatus("Test the server connection and press OK before continuing.")
 		return model.ServerConnection{}, false
 	}
 	return s, true
@@ -2604,145 +2838,6 @@ func combinationsRequireRipReadback(combos []combinations.Combination) bool {
 		}
 	}
 	return false
-}
-
-func (w *Window) selectedCombinations() ([]combinations.Combination, []combinations.Axis, error) {
-	w.mu.Lock()
-	model := w.capabilities
-	w.mu.Unlock()
-	axes := make([]combinations.Axis, 0, len(w.selected)+1)
-	ids := make([]string, 0, len(w.selected)+1)
-	seenIDs := make(map[string]struct{}, len(w.selected)+1)
-	for id := range w.selected {
-		if !isCopiesOption(id) {
-			ids = append(ids, id)
-			seenIDs[id] = struct{}{}
-		}
-	}
-	if strings.TrimSpace(w.pageRangeInput.Text()) != "" {
-		if _, exists := model.OptionByID(pageRangeOptionID); !exists {
-			return nil, nil, fmt.Errorf("page range: the connected Fiery did not advertise %s", pageRangeOptionID)
-		} else if _, listed := seenIDs[pageRangeOptionID]; !listed {
-			ids = append(ids, pageRangeOptionID)
-		}
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		option, exists := model.OptionByID(id)
-		if !exists {
-			continue
-		}
-		vals := selectedValues(w.selected[id])
-		if isPageRangeOption(id) {
-			filtered := vals[:0]
-			for _, value := range vals {
-				if !strings.EqualFold(strings.TrimSpace(value), pageRangeCustomServerValue) {
-					filtered = append(filtered, value)
-				}
-			}
-			vals = filtered
-			customInput := strings.TrimSpace(w.pageRangeInput.Text())
-			if customInput != "" {
-				selection, err := pagevalues.Parse(customInput, pagevalues.DefaultExpansionLimit)
-				if err != nil {
-					return nil, nil, fmt.Errorf("page range: %w", err)
-				}
-				if w.strategy != combinations.StrategySelected {
-					vals = append([]string(nil), checkboxOptionValues(option)...)
-				}
-				vals = append(vals, pageRangeInternalPrefix+selection.Normalized)
-			} else if len(vals) > 0 && w.strategy != combinations.StrategySelected {
-				vals = append([]string(nil), checkboxOptionValues(option)...)
-			}
-		} else if len(vals) > 0 && w.strategy != combinations.StrategySelected {
-			allValues := optionValues(option)
-			if len(allValues) > len(vals) {
-				vals = allValues
-			}
-		}
-		if len(vals) == 0 {
-			continue
-		}
-		sort.Strings(vals)
-		axes = append(axes, combinations.Axis{Name: id, Values: vals})
-	}
-	if len(axes) == 0 && w.strategy != combinations.StrategySelected {
-		axes = defaultPermutationAxes(model)
-	}
-	hasRange := false
-	if copyOption, ok := copiesOption(model); ok {
-		copySelection, err := copyvalues.Parse(w.copiesInput.Text())
-		if err != nil {
-			return nil, nil, fmt.Errorf("copies: %w", err)
-		}
-		hasRange = copySelection.HasRange
-		axes = append(axes, combinations.Axis{Name: copyOption.ID, Values: copySelection.Values})
-	}
-	for _, option := range model.Options {
-		if option.Range == nil || isCopiesOption(option.ID) {
-			continue
-		}
-		input := w.numericInputs[option.ID]
-		if input == nil || strings.TrimSpace(input.Text()) == "" {
-			continue
-		}
-		bounds := rangevalues.Bounds{Min: option.Range.Min, Max: option.Range.Max, Increment: option.Range.Increment, Precision: option.Range.Precision}
-		selection, err := rangevalues.Parse(input.Text(), bounds, rangevalues.DefaultExpansionLimit)
-		if err != nil {
-			return nil, nil, fmt.Errorf("%s (%s): %w", option.Label, option.ID, err)
-		}
-		hasRange = hasRange || selection.HasRange
-		axes = append(axes, combinations.Axis{Name: option.ID, Values: selection.Values})
-	}
-	if len(axes) == 0 {
-		return []combinations.Combination{{}}, nil, nil
-	}
-	generationStrategy := w.strategy
-	if hasRange && generationStrategy != combinations.StrategyPairwise {
-		// Numeric ranges request distribution across the full range. When the
-		// product exceeds Max cases, direct mixed-radix sampling avoids both a
-		// low-value bias and materializing the full Cartesian product.
-		generationStrategy = combinations.StrategyRandom
-	}
-	requestedLimit := parseCaseLimit(w.maxCases.Text())
-	candidateLimit := requestedLimit
-	axisIDs := make(map[string]struct{}, len(axes))
-	for _, axis := range axes {
-		axisIDs[axis.Name] = struct{}{}
-	}
-	if capabilities.HasExplicitConstraintDependencies(model, axisIDs) {
-		// Generate a bounded reserve so an invalid early Cartesian/pairwise row
-		// does not consume the user's entire Max cases allowance when compatible
-		// rows exist later. The global 10,000 safety ceiling still applies.
-		candidateLimit = maxCaseLimit
-	}
-	generated := combinations.GenerateWithStrategy(axes, generationStrategy, candidateLimit)
-	if hasRange && len(generated) > 1 {
-		mathrand.Shuffle(len(generated), func(left, right int) {
-			generated[left], generated[right] = generated[right], generated[left]
-		})
-	}
-	valid := generated[:0]
-	w.constraintSkipped = 0
-	w.constraintWarning = ""
-	for _, combination := range generated {
-		conflicts := capabilities.ValidateCombination(model, combinationForConstraintValidation(combination))
-		if len(conflicts) > 0 {
-			w.constraintSkipped++
-			if w.constraintWarning == "" {
-				w.constraintWarning = conflicts[0].Error()
-			}
-			continue
-		}
-		valid = append(valid, combination)
-	}
-	if len(valid) == 0 && len(generated) > 0 {
-		return nil, axes, fmt.Errorf("all generated combinations conflict with published Fiery constraints; first conflict: %s", w.constraintWarning)
-	}
-	if len(valid) > requestedLimit {
-		valid = valid[:requestedLimit]
-	}
-	return valid, axes, nil
 }
 
 func copiesOption(model capabilities.Model) (capabilities.Option, bool) {
@@ -2900,21 +2995,41 @@ func selectedValues(m map[string]*widget.Bool) []string {
 	return vals
 }
 func combinationForConstraintValidation(combination combinations.Combination) map[string]string {
-	if !strings.HasPrefix(combination[pageRangeOptionID], pageRangeInternalPrefix) {
-		return combination
-	}
-	normalized := cloneStringMap(combination)
-	normalized[pageRangeOptionID] = pageRangeCustomServerValue
-	return normalized
+	return combinationToAttributes(combination)
 }
 
 func combinationToAttributes(combination combinations.Combination) map[string]string {
 	attributes := cloneStringMap(combination)
 	if custom, ok := attributes[pageRangeOptionID]; ok && strings.HasPrefix(custom, pageRangeInternalPrefix) {
-		attributes[pageRangeOptionID] = pageRangeCustomServerValue
-		attributes[pageRangeDataID] = strings.TrimPrefix(custom, pageRangeInternalPrefix)
+		attributes[pageRangeOptionID] = strings.TrimPrefix(custom, pageRangeInternalPrefix)
 	}
+	// CWS/Postman evidence shows custom ranges are represented directly by
+	// EFPageRange while DPP_PAGE_RANGE remains empty. Never emit the legacy
+	// companion, even if stale data reaches combination generation.
+	delete(attributes, pageRangeLegacyDataID)
 	return attributes
+}
+
+func normalizeOutputProfileValue(value string) string {
+	// U+FEFF is part of Fiery's advertised EFOutProfile wire identity, but is
+	// not a visible part of the profile name. Ignore it only for presentation
+	// and readback comparison; combinationToAttributes must preserve it.
+	return strings.TrimSpace(strings.Trim(strings.TrimSpace(value), "\ufeff"))
+}
+
+func displayOptionValue(optionID, value string) string {
+	if strings.EqualFold(strings.TrimSpace(optionID), outputProfileOptionID) {
+		return normalizeOutputProfileValue(value)
+	}
+	return value
+}
+
+func optionValueMatches(optionID, left, right string) bool {
+	if strings.EqualFold(strings.TrimSpace(optionID), outputProfileOptionID) {
+		left = normalizeOutputProfileValue(left)
+		right = normalizeOutputProfileValue(right)
+	}
+	return strings.EqualFold(strings.TrimSpace(left), strings.TrimSpace(right))
 }
 
 func cloneStringMap[M ~map[string]string](source M) map[string]string {
@@ -2933,12 +3048,8 @@ func selectedReadbackValues(got, selected map[string]string) map[string]string {
 		return nil
 	}
 	values := make(map[string]string, len(selected))
-	for key, selectedValue := range selected {
-		value := got[key]
-		if strings.EqualFold(key, pageRangeOptionID) && strings.EqualFold(selectedValue, pageRangeCustomServerValue) && strings.TrimSpace(value) == "" && strings.TrimSpace(got[pageRangeDataID]) != "" {
-			value = pageRangeCustomServerValue
-		}
-		values[key] = value
+	for key := range selected {
+		values[key] = got[key]
 	}
 	return values
 }
@@ -2972,19 +3083,9 @@ func optionValues(opt capabilities.Option) []string {
 }
 
 func checkboxOptionValues(opt capabilities.Option) []string {
-	values := optionValues(opt)
-	if !isPageRangeOption(opt.ID) {
-		return values
-	}
-	// Range1 is Fiery's placeholder for a custom range text value, not a
-	// standalone checkbox choice. The dedicated editor supplies its contents.
-	filtered := make([]string, 0, len(values))
-	for _, value := range values {
-		if !strings.EqualFold(strings.TrimSpace(value), pageRangeCustomServerValue) {
-			filtered = append(filtered, value)
-		}
-	}
-	return filtered
+	// Every advertised enum remains an independent exact value. Custom text is
+	// a separate direct EFPageRange expression and never replaces Range1.
+	return optionValues(opt)
 }
 
 func (w *Window) finishRun(status string) error {
@@ -3109,6 +3210,14 @@ func (w *Window) addResult(result reportxlsx.Result) {
 	duration := time.Duration(result.DurationMS) * time.Millisecond
 	w.mu.Lock()
 	w.resultCount++
+	switch strings.ToUpper(strings.TrimSpace(result.Result)) {
+	case "PASS":
+		w.passedCount++
+	case "FAIL":
+		w.failedCount++
+	default:
+		w.errorCount++
+	}
 	w.results = append(w.results, resultRow{JobID: result.JobID, JobName: result.JobName, Result: result.Result, Status: result.JobStatus, State: result.JobState, Duration: duration.Round(time.Millisecond).String(), Detail: result.Detail})
 	if len(w.results) > maxRetainedResults+retainedEntryTrimBatch {
 		w.results = append([]resultRow(nil), w.results[len(w.results)-maxRetainedResults:]...)
@@ -3272,7 +3381,7 @@ func toggle(th *material.Theme, b *widget.Clickable, text string, active bool) l
 func navButton(th *material.Theme, b *widget.Clickable, text string, active bool) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Bottom: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			btn := material.Button(th, b, "› "+text)
+			btn := material.Button(th, b, text)
 			btn.Background = rgb(0x1e293b)
 			btn.Color = rgb(0xe2e8f0)
 			if active {

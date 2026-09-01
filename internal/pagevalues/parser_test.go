@@ -12,6 +12,19 @@ func TestParseNormalizesPageListsAndRanges(t *testing.T) {
 	}
 }
 
+func TestParseMatchesObservedFieryCustomRange(t *testing.T) {
+	selection, err := Parse("5 to 10", DefaultExpansionLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.Normalized != "5-10" || len(selection.Pages) != 6 || selection.MaxPage != 10 {
+		t.Fatalf("observed Fiery range normalization = %#v", selection)
+	}
+	if err := selection.ValidatePageCount(12); err != nil {
+		t.Fatalf("5-10 should fit the observed 12-page source: %v", err)
+	}
+}
+
 func TestParseRejectsInvalidOrExcessiveRanges(t *testing.T) {
 	for _, input := range []string{"", "0", "4-2", "1,,2", "one"} {
 		if _, err := Parse(input, DefaultExpansionLimit); err == nil {

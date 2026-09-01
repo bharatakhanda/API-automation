@@ -2,6 +2,19 @@ package combinations
 
 import "testing"
 
+func TestGenerateSingleConfigurationUsesFirstNormalizedValue(t *testing.T) {
+	got := GenerateWithStrategy([]Axis{
+		{Name: "Color", Values: []string{"Grayscale", "CMYK"}},
+		{Name: "Duplex", Values: []string{"On", "Off"}},
+	}, StrategySingle, 100)
+	if len(got) != 1 || got[0]["Color"] != "CMYK" || got[0]["Duplex"] != "Off" {
+		t.Fatalf("single configuration = %#v", got)
+	}
+	if got := GenerateWithStrategy([]Axis{{Name: "Color", Values: []string{"CMYK"}}}, StrategySingle, 0); got != nil {
+		t.Fatalf("zero-limit single configuration = %#v", got)
+	}
+}
+
 func TestGenerateCartesianProduct(t *testing.T) {
 	got := Generate([]Axis{
 		{Name: "EFResolution", Values: []string{"360x360dpi", "360x720dpi"}},

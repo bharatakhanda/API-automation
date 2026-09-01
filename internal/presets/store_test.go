@@ -49,14 +49,14 @@ func TestStorePersistsSafeServerPresetSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Save(Preset{Name: "Production", ServerPresetID: "SERVER-PRESET-1"}); err != nil {
+	if err := store.Save(Preset{Name: "Production", ServerPresetID: "SERVER-PRESET-1", Strategy: "pairwise", ValueSource: "advertised", TestIntent: "constraint", ConstraintMode: "validation"}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.List()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].ServerPresetID != "SERVER-PRESET-1" {
+	if len(got) != 1 || got[0].ServerPresetID != "SERVER-PRESET-1" || got[0].ValueSource != "advertised" || got[0].TestIntent != "constraint" || got[0].ConstraintMode != "validation" {
 		t.Fatalf("presets = %#v", got)
 	}
 }

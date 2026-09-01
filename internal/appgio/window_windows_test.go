@@ -4,7 +4,9 @@ package appgio
 
 import (
 	"context"
+	"errors"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"api-automation/internal/capabilities"
 	"api-automation/internal/combinations"
 	"api-automation/internal/fiery"
+	"api-automation/internal/model"
 	"api-automation/internal/presets"
 
 	"gioui.org/widget"
@@ -53,25 +56,58 @@ func TestRunModesHaveExpectedLifecycle(t *testing.T) {
 	}
 }
 
-func TestWorkspaceSeparatesAdministrationResultsAndActivityLogs(t *testing.T) {
-	if len(workspacePages) != 5 {
-		t.Fatalf("workspace page count = %d, want 5", len(workspacePages))
+func TestWorkspaceNavigationSeparatesOperationalPages(t *testing.T) {
+	if len(workspacePages) != pageCount {
+		t.Fatalf("workspace page count = %d, want %d", len(workspacePages), pageCount)
+	}
+	pages := []struct {
+		page  int
+		label string
+	}{
+		{pageConnection, "Connection"}, {pageOverview, "Overview"}, {pageTestSettings, "Test Settings"},
+		{pageJobProperties, "Job Properties"}, {pageAutomation, "Automation"}, {pageResults, "Results"},
+	}
+	for _, want := range pages {
+		if workspacePages[want.page].NavigationLabel != want.label {
+			t.Fatalf("workspace page %d = %#v, want %q", want.page, workspacePages[want.page], want.label)
+		}
 	}
 	if workspacePages[pageAdministration].NavigationLabel != "Administration" || pageAdministration == pageResults {
 		t.Fatalf("administration page is not separate: %#v", workspacePages[pageAdministration])
 	}
-	if workspacePages[pageResults].NavigationLabel != "Results" {
-		t.Fatalf("results page = %#v", workspacePages[pageResults])
-	}
-	if workspacePages[pageLogs].NavigationLabel != "Activity logs" || pageLogs == pageResults {
+	if workspacePages[pageLogs].NavigationLabel != "Activity Logs" || pageLogs == pageResults {
 		t.Fatalf("logs page is not separate: %#v", workspacePages[pageLogs])
 	}
 
-	window := &Window{activePage: pageResults}
+	window := &Window{activePage: pageConnection}
+	window.setActivePage(pageOverview)
+	if window.activePage != pageConnection {
+		t.Fatalf("connection gate allowed page %d before approval", window.activePage)
+	}
+	window.hasActiveServer = true
+	window.activePage = pageResults
 	window.list.Position.Offset = 42
 	window.setActivePage(pageLogs)
 	if window.activePage != pageLogs || window.list.Position.Offset != 0 {
 		t.Fatalf("page switch did not reset scrolling: page=%d position=%#v", window.activePage, window.list.Position)
+	}
+}
+
+func TestExistingCredentialsStayOutOfConnectionEditors(t *testing.T) {
+	window := &Window{
+		activeServer:    model.ServerConnection{IPAddress: "fiery.example", SecretKey: "configured-key", Password: "configured-password"},
+		hasActiveServer: true,
+		activePage:      pageOverview,
+	}
+	window.secretKey.SetText("stale editor value")
+	window.password.SetText("stale editor value")
+	window.beginConnectionChange()
+	if window.secretKey.Text() != "" || window.password.Text() != "" {
+		t.Fatal("existing secret key or password was repopulated into a connection editor")
+	}
+	draft := window.draftConnectionUnchecked()
+	if draft.SecretKey != "configured-key" || draft.Password != "configured-password" {
+		t.Fatal("blank replacement fields did not retain configured credentials internally")
 	}
 }
 
@@ -108,9 +144,40 @@ func TestSelectedServerPresetMustStillBeAdvertised(t *testing.T) {
 	}
 }
 
+func TestOverviewLabelsAndServerFormatting(t *testing.T) {
+	if got := capabilityActionLabel(false); got != "Get Capabilities" {
+		t.Fatalf("initial capability action = %q", got)
+	}
+	if got := capabilityActionLabel(true); got != "Refresh Capabilities" {
+		t.Fatalf("loaded capability action = %q", got)
+	}
+	if got := formatServerUptime(2*24*60*60 + 3*60*60 + 4*60); got != "2d 3h 4m" {
+		t.Fatalf("uptime = %q", got)
+	}
+	if state, _ := effectiveOverviewServerState("Idle", "API running", false); state != "Idle" {
+		t.Fatalf("idle API state = %q", state)
+	}
+	if state, detail := effectiveOverviewServerState("Idle", "API running", true); state != "Busy" || !strings.Contains(detail, "automation active") {
+		t.Fatalf("active automation state = %q detail=%q", state, detail)
+	}
+	if overviewStatusPollInterval != time.Second {
+		t.Fatalf("overview polling interval = %s", overviewStatusPollInterval)
+	}
+	window := &Window{}
+	window.running.Store(true)
+	window.captureActive = true
+	if window.jobAutomationActive() {
+		t.Fatal("capability capture was treated as job processing")
+	}
+	window.captureActive = false
+	if !window.jobAutomationActive() {
+		t.Fatal("active job automation was not detected")
+	}
+}
+
 func TestInputLimitsProtectAutomationResources(t *testing.T) {
-	if maxWorkerCount != 1000 {
-		t.Fatalf("maximum parallel jobs = %d, want 1000", maxWorkerCount)
+	if maxWorkerCount != 10 {
+		t.Fatalf("maximum parallel jobs = %d, want 10", maxWorkerCount)
 	}
 	if got := parseWorkerCount("999999"); got != maxWorkerCount {
 		t.Fatalf("worker count = %d, want %d", got, maxWorkerCount)
@@ -118,11 +185,11 @@ func TestInputLimitsProtectAutomationResources(t *testing.T) {
 	if got := parseWorkerCount("invalid"); got != 1 {
 		t.Fatalf("invalid worker count = %d", got)
 	}
-	if got := effectiveWorkerCount(1000, 12); got != 12 {
-		t.Fatalf("effective worker count = %d, want 12 for 12 planned jobs", got)
+	if got := effectiveWorkerCount(1000, 7); got != 7 {
+		t.Fatalf("effective worker count = %d, want 7 for 7 planned jobs", got)
 	}
-	if got := effectiveWorkerCount(1000, 5000); got != 1000 {
-		t.Fatalf("effective worker count = %d, want maximum 1000", got)
+	if got := effectiveWorkerCount(1000, 5000); got != maxWorkerCount {
+		t.Fatalf("effective worker count = %d, want maximum %d", got, maxWorkerCount)
 	}
 	if got := parseCaseLimit("999999999"); got != maxCaseLimit {
 		t.Fatalf("case limit = %d, want %d", got, maxCaseLimit)
@@ -185,7 +252,7 @@ func TestResetSelectionsRestoresAutomationDefaults(t *testing.T) {
 	if window.selected["EFResolution"]["360x720dpi"].Value || window.groupChecks["Print"].Value || window.optionChecks["EFResolution"].Value {
 		t.Fatal("checkbox selections were not cleared")
 	}
-	if window.strategy != combinations.StrategySelected || window.copiesInput.Text() != "1" || window.pageRangeInput.Text() != "" || window.workers.Text() != "1" || window.maxCases.Text() != "100" {
+	if window.strategy != combinations.StrategySingle || window.valueSource != valueSourceSelected || window.testIntent != testIntentPositive || window.constraintMode != constraintValidationOnly || window.copiesInput.Text() != "1" || window.pageRangeInput.Text() != "" || window.workers.Text() != "1" || window.maxCases.Text() != "100" {
 		t.Fatalf("defaults not restored: strategy=%s copies=%q pageRange=%q workers=%q cases=%q", window.strategy, window.copiesInput.Text(), window.pageRangeInput.Text(), window.workers.Text(), window.maxCases.Text())
 	}
 	if window.fileModeGroup.Value != "all" || !window.modeChecks[0].Value || window.modeChecks[1].Value || window.jobActionID.Text() != "" {
@@ -221,13 +288,14 @@ func TestLoadPresetRestoresSafeSettingsAndPreservesCredentials(t *testing.T) {
 			{ID: "EFColorMode", Values: []string{"CMYK", "Grayscale"}},
 			{ID: "num copies", Range: &capabilities.NumericRange{Min: 1, Max: 9999, Increment: 1}},
 			{ID: "Scaling", Range: &capabilities.NumericRange{Min: 25, Max: 400, Increment: 1}},
-			{ID: pageRangeOptionID, Values: []string{"All", "Odd", "Even", pageRangeCustomServerValue}},
+			{ID: pageRangeOptionID, Values: []string{"All", "Odd", "Even", pageRangeRangeValue}},
 		}},
 		presetList: []presets.Preset{{
 			Name: "Production", ServerSerial: "SERVER-1", ServerPresetID: "SERVER-PRESET-1",
 			SelectedValues: map[string][]string{"EFColorMode": {"CMYK"}},
-			NumericInputs:  map[string]string{"num copies": "5-7", "Scaling": "100", pageRangeDataID: "1,3-5"},
-			Strategy:       "pairwise", MaxCases: "250", ParallelJobs: "8", RunModes: []string{"Process and Hold"}, FileMode: "random",
+			NumericInputs:  map[string]string{"num copies": "5-7", "Scaling": "100", pageRangeOptionID: "1,3-5"},
+			Strategy:       "pairwise", ValueSource: "advertised", TestIntent: "constraint", ConstraintMode: "validation",
+			MaxCases: "250", ParallelJobs: "8", RunModes: []string{"Process and Hold"}, FileMode: "random",
 		}},
 		modeChecks: make([]widget.Bool, len(runModes)),
 	}
@@ -239,7 +307,7 @@ func TestLoadPresetRestoresSafeSettingsAndPreservesCredentials(t *testing.T) {
 	if !window.selected["EFColorMode"]["CMYK"].Value || window.copiesInput.Text() != "5-7" || window.numericInputs["Scaling"].Text() != "100" || window.pageRangeInput.Text() != "1,3-5" {
 		t.Fatalf("preset values were not restored: selected=%#v copies=%q scale=%q pageRange=%q", window.selected, window.copiesInput.Text(), window.numericInputs["Scaling"].Text(), window.pageRangeInput.Text())
 	}
-	if window.strategy != combinations.StrategyPairwise || window.maxCases.Text() != "250" || window.workers.Text() != "8" || window.fileModeGroup.Value != "random" || !window.modeChecks[1].Value {
+	if window.strategy != combinations.StrategyPairwise || window.valueSource != valueSourceAdvertised || window.testIntent != testIntentConstraint || window.constraintMode != constraintValidationOnly || window.maxCases.Text() != "250" || window.workers.Text() != "8" || window.fileModeGroup.Value != "random" || !window.modeChecks[1].Value {
 		t.Fatal("preset execution controls were not restored")
 	}
 	if window.serverPresetGroup.Value != "SERVER-PRESET-1" {
@@ -248,15 +316,23 @@ func TestLoadPresetRestoresSafeSettingsAndPreservesCredentials(t *testing.T) {
 	if window.serverIP.Text() != "server.example" || window.secretKey.Text() != "secret-not-saved-in-preset" || window.password.Text() != "password-not-saved-in-preset" {
 		t.Fatal("loading a preset changed connection credentials")
 	}
+
+	// Preserve compatibility with local presets saved by the old companion-field
+	// implementation, but migrate their value into the direct EFPageRange input.
+	window.presetList[0].NumericInputs = map[string]string{pageRangeLegacyDataID: "2-4"}
+	window.loadNamedPreset()
+	if window.pageRangeInput.Text() != "2-4" {
+		t.Fatalf("legacy custom page-range preset was not migrated: %q", window.pageRangeInput.Text())
+	}
 }
 
-func TestCustomPageRangeUsesTextFieldAndValidatesImportedPageCount(t *testing.T) {
+func TestCustomPageRangeUsesDirectEFPageRangeAndValidatesImportedPageCount(t *testing.T) {
 	window := &Window{
 		selected: map[string]map[string]*widget.Bool{pageRangeOptionID: {
-			"All": {Value: false}, "Odd": {Value: false}, "Even": {Value: false}, pageRangeCustomServerValue: {Value: true},
+			"All": {}, "Odd": {}, "Even": {}, pageRangeRangeValue: {},
 		}},
 		capabilities: capabilities.Model{Options: []capabilities.Option{
-			{ID: pageRangeOptionID, Label: "Page range", Value: "All", Values: []string{"All", "Odd", "Even", pageRangeCustomServerValue}},
+			{ID: pageRangeOptionID, Label: "Page range", Value: "All", Values: []string{"All", "Odd", "Even", pageRangeRangeValue}},
 			{ID: "num copies", Label: "Copies", Value: "1"},
 		}},
 		strategy: combinations.StrategySelected,
@@ -271,8 +347,15 @@ func TestCustomPageRangeUsesTextFieldAndValidatesImportedPageCount(t *testing.T)
 		t.Fatalf("generated combinations = %#v", generated)
 	}
 	attributes := combinationToAttributes(generated[0])
-	if attributes[pageRangeOptionID] != pageRangeCustomServerValue || attributes[pageRangeDataID] != "1,3,5-7" {
+	if attributes[pageRangeOptionID] != "1,3,5-7" {
 		t.Fatalf("custom page-range attributes = %#v", attributes)
+	}
+	if _, exists := attributes[pageRangeLegacyDataID]; exists {
+		t.Fatalf("legacy page-range companion was synthesized: %#v", attributes)
+	}
+	constraintValues := combinationForConstraintValidation(generated[0])
+	if constraintValues[pageRangeOptionID] != "1,3,5-7" {
+		t.Fatalf("custom page-range constraint value = %#v", constraintValues)
 	}
 	if err := validateCustomPageRange(attributes, map[string]string{"OrigPageCount": "7"}); err != nil {
 		t.Fatalf("valid page range failed: %v", err)
@@ -280,12 +363,90 @@ func TestCustomPageRangeUsesTextFieldAndValidatesImportedPageCount(t *testing.T)
 	if err := validateCustomPageRange(attributes, map[string]string{"OrigPageCount": "6"}); err == nil {
 		t.Fatal("page range beyond the imported file unexpectedly passed")
 	}
-	if values := checkboxOptionValues(window.capabilities.Options[0]); len(values) != 3 || containsStringFold(values, pageRangeCustomServerValue) {
-		t.Fatalf("Range1 placeholder remained a checkbox: %v", values)
+	if values := checkboxOptionValues(window.capabilities.Options[0]); len(values) != 4 || !containsStringFold(values, pageRangeRangeValue) {
+		t.Fatalf("server-advertised Range1 was not retained as an ordinary option: %v", values)
 	}
-	got := map[string]string{pageRangeDataID: "1,3,5,6,7"}
-	if !window.attributesMatch(got, attributes) {
-		t.Fatalf("semantic page-range readback did not match: got=%#v expected=%#v", got, attributes)
+	if !window.attributesMatch(map[string]string{pageRangeOptionID: "1,3,5,6,7", pageRangeLegacyDataID: ""}, attributes) {
+		t.Fatal("semantic direct EFPageRange readback did not match")
+	}
+	if window.attributesMatch(map[string]string{pageRangeOptionID: "", pageRangeLegacyDataID: "1,3,5,6,7"}, attributes) {
+		t.Fatal("legacy DPP_PAGE_RANGE-only readback incorrectly matched")
+	}
+	if window.attributesMatch(map[string]string{pageRangeOptionID: "1-2", pageRangeLegacyDataID: "1,3,5-7"}, attributes) {
+		t.Fatal("wrong direct EFPageRange was hidden by the legacy companion")
+	}
+	readback := selectedReadbackValues(map[string]string{pageRangeOptionID: "1,3,5-7", pageRangeLegacyDataID: ""}, attributes)
+	if readback[pageRangeOptionID] != "1,3,5-7" {
+		t.Fatalf("materialized page-range result = %#v", readback)
+	}
+	if _, exists := readback[pageRangeLegacyDataID]; exists {
+		t.Fatalf("legacy page-range value was materialized: %#v", readback)
+	}
+	withStaleCompanion := combinationToAttributes(combinations.Combination{
+		pageRangeOptionID:     pageRangeInternalPrefix + "5-10",
+		pageRangeLegacyDataID: "stale-value",
+	})
+	if withStaleCompanion[pageRangeOptionID] != "5-10" {
+		t.Fatalf("direct custom range = %#v", withStaleCompanion)
+	}
+	if _, exists := withStaleCompanion[pageRangeLegacyDataID]; exists {
+		t.Fatalf("stale legacy companion survived serialization: %#v", withStaleCompanion)
+	}
+}
+
+func TestCustomPageRangeRequiresRangeCapableEFPageRange(t *testing.T) {
+	window := &Window{
+		selected: map[string]map[string]*widget.Bool{pageRangeOptionID: {
+			"All": {}, "Odd": {}, "Even": {},
+		}},
+		capabilities: capabilities.Model{Options: []capabilities.Option{
+			{ID: pageRangeOptionID, Values: []string{"All", "Odd", "Even"}},
+			{ID: "num copies", Value: "1"},
+		}},
+		strategy: combinations.StrategySelected,
+	}
+	window.copiesInput.SetText("1")
+	window.pageRangeInput.SetText("1-5")
+	if _, _, err := window.selectedCombinations(); err == nil || !strings.Contains(err.Error(), pageRangeOptionID) {
+		t.Fatalf("unsupported custom page range error = %v", err)
+	}
+}
+
+func TestAdvertisedRange1RemainsAnExactIndependentValue(t *testing.T) {
+	attributes := combinationToAttributes(combinations.Combination{pageRangeOptionID: pageRangeRangeValue})
+	if attributes[pageRangeOptionID] != pageRangeRangeValue {
+		t.Fatalf("fixed Range1 attribute = %#v", attributes)
+	}
+	if _, exists := attributes[pageRangeLegacyDataID]; exists {
+		t.Fatalf("legacy companion was synthesized: %#v", attributes)
+	}
+	window := &Window{}
+	if window.expectedAttributeMatches(map[string]string{pageRangeLegacyDataID: "1-5"}, attributes, pageRangeOptionID, pageRangeRangeValue) {
+		t.Fatal("fixed Range1 was accepted from an unrelated DPP_PAGE_RANGE expression")
+	}
+}
+
+func TestOutputProfilePreservesWireIdentityAndNormalizesOnlyDisplayAndComparison(t *testing.T) {
+	window := &Window{capabilities: capabilities.Model{Options: []capabilities.Option{{ID: outputProfileOptionID, Value: "DEFAULT_MEDIA"}}}}
+	visible := "360x360 CMYKOV v3F - Fiery Edge - Vela"
+	wire := "\ufeff" + visible
+	if got := combinationToAttributes(combinations.Combination{outputProfileOptionID: wire}); got[outputProfileOptionID] != wire {
+		t.Fatalf("output profile wire value = %q, want exact advertised %q", got[outputProfileOptionID], wire)
+	}
+	if got := displayOptionValue(outputProfileOptionID, wire); got != visible {
+		t.Fatalf("output profile display value = %q, want %q", got, visible)
+	}
+	if !window.attributeValueMatches(outputProfileOptionID, wire, visible) {
+		t.Fatal("output-profile readback with U+FEFF did not match the visible advertised value")
+	}
+	if !optionValueMatches(outputProfileOptionID, wire, visible) {
+		t.Fatal("legacy BOM-less preset value did not match the exact advertised profile")
+	}
+	if window.attributeValueMatches(outputProfileOptionID, visible+" changed", visible) {
+		t.Fatal("different output-profile names unexpectedly matched")
+	}
+	if !window.attributeValueMatches(outputProfileOptionID, "", "DEFAULT_MEDIA") {
+		t.Fatal("omitted default output-profile readback did not retain default-value semantics")
 	}
 }
 
@@ -346,8 +507,85 @@ func TestSelectedCombinationsSkipsPublishedConstraintConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0]["EFEdgeDropSize"] != "0_1_2_2_2" || window.constraintSkipped != 1 {
+	if len(got) != 1 || got[0]["EFEdgeDropSize"] != "None" || window.constraintSkipped != 1 {
 		t.Fatalf("combinations=%#v skipped=%d warning=%q", got, window.constraintSkipped, window.constraintWarning)
+	}
+}
+
+func TestAutomationValueSourcesAreIndependentFromGenerationStrategy(t *testing.T) {
+	window := &Window{
+		strategy: combinations.StrategyAll,
+		selected: map[string]map[string]*widget.Bool{
+			"EFColorMode": {"CMYK": &widget.Bool{Value: true}},
+		},
+		capabilities: capabilities.Model{Options: []capabilities.Option{
+			{ID: "EFColorMode", Value: "Grayscale", Values: []string{"CMYK", "Grayscale"}},
+			{ID: "num copies", Value: "1"},
+		}},
+	}
+	window.copiesInput.SetText("1")
+	window.maxCases.SetText("100")
+
+	window.valueSource = valueSourceSelected
+	selected, _, err := window.selectedCombinations()
+	if err != nil || len(selected) != 1 || selected[0]["EFColorMode"] != "CMYK" {
+		t.Fatalf("user-selected plan=%#v err=%v", selected, err)
+	}
+	window.valueSource = valueSourceDefaults
+	defaults, _, err := window.selectedCombinations()
+	if err != nil || len(defaults) != 1 || defaults[0]["EFColorMode"] != "Grayscale" {
+		t.Fatalf("advertised-default plan=%#v err=%v", defaults, err)
+	}
+	window.valueSource = valueSourceAdvertised
+	advertised, _, err := window.selectedCombinations()
+	if err != nil || len(advertised) != 2 {
+		t.Fatalf("all-advertised plan=%#v err=%v", advertised, err)
+	}
+	window.valueSource = valueSourceBaseline
+	baseline, axes, err := window.selectedCombinations()
+	if err != nil || len(baseline) != 1 || len(baseline[0]) != 0 || len(axes) != 0 {
+		t.Fatalf("baseline plan=%#v axes=%#v err=%v", baseline, axes, err)
+	}
+}
+
+func TestConstraintIntentKeepsOnlyPublishedConflicts(t *testing.T) {
+	window := &Window{
+		strategy:    combinations.StrategyAll,
+		valueSource: valueSourceSelected,
+		testIntent:  testIntentConstraint,
+		selected: map[string]map[string]*widget.Bool{
+			"EFResolution":   {"360x720dpi": &widget.Bool{Value: true}},
+			"EFEdgeDropSize": {"None": &widget.Bool{Value: true}, "0_1_2_2_2": &widget.Bool{Value: true}},
+		},
+		capabilities: capabilities.Model{Options: []capabilities.Option{
+			{ID: "EFResolution", Values: []string{"360x720dpi"}, Constraints: capabilities.Constraints{"360x720dpi": {"EFEdgeDropSize": {"0_1_2_2_2"}}}},
+			{ID: "EFEdgeDropSize", Values: []string{"None", "0_1_2_2_2"}},
+		}},
+	}
+	window.maxCases.SetText("100")
+	got, _, err := window.selectedCombinations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0]["EFEdgeDropSize"] != "0_1_2_2_2" || window.constraintWarning == "" {
+		t.Fatalf("constraint cases=%#v skipped=%d warning=%q", got, window.constraintSkipped, window.constraintWarning)
+	}
+}
+
+func TestExpectedConstraintRejectionClassificationRejectsOperationalErrors(t *testing.T) {
+	if !expectedConstraintRejection(errors.New("HTTP 422 invalid constraint combination")) {
+		t.Fatal("explicit HTTP 422 constraint rejection was not accepted")
+	}
+	for _, message := range []string{
+		"HTTP 500 constraint service crashed",
+		"HTTP 404 endpoint not found",
+		"HTTP 400 unrelated bad request",
+		"HTTP 400 invalid JSON payload",
+		"context deadline exceeded",
+	} {
+		if expectedConstraintRejection(errors.New(message)) {
+			t.Fatalf("operational/unrelated error was treated as expected rejection: %s", message)
+		}
 	}
 }
 

@@ -23,6 +23,9 @@ type Preset struct {
 	SelectedValues map[string][]string `json:"selectedValues,omitempty"`
 	NumericInputs  map[string]string   `json:"numericInputs,omitempty"`
 	Strategy       string              `json:"strategy"`
+	ValueSource    string              `json:"valueSource,omitempty"`
+	TestIntent     string              `json:"testIntent,omitempty"`
+	ConstraintMode string              `json:"constraintMode,omitempty"`
 	MaxCases       string              `json:"maxCases"`
 	ParallelJobs   string              `json:"parallelJobs"`
 	RunModes       []string            `json:"runModes,omitempty"`
