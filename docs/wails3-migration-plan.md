@@ -178,6 +178,8 @@ Deliverables:
 
 Exit gate: connection, external Busy, preset, and destructive-operation safeguards are testable headlessly and unchanged in Gio.
 
+Status (2026-09-02): complete on `refactor/platform-neutral-core`. The application layer now owns exact-draft connection approval/invalidation and internal credential resolution; Overview polling intervals, bounded job-probe limits, exponential backoff, workload/automation Busy composition, and atomic generation guards; safe preset capture plus capability-aware canonical revalidation; and administration interlocks, inventory leases, exact typed confirmation, pre-clear count revalidation, empty-inventory verification, and recovery polling. Gio retains editors, native confirmations, HTTP adapter invocation, the thin polling loop, and rendering; backend state and safeguards remain authoritative. Headless tests cover connection replacement, external workload state, stale monitor generations, preset migration/reconciliation, operation interlocks, inventory expiry/server binding, clear verification, and recovery status. Full quality/race/security checks, Darwin ARM64 compilation, secret-safe GUI build, and GUI smoke testing pass.
+
 ### Stage 4 — Core extraction integration
 
 Deliverables:

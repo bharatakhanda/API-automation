@@ -20,7 +20,7 @@ Updated: 2026-09-02
 - `gio-stable-20260902` marks the validated rollback point before platform-neutral core extraction.
 - Latest implementation work fixes custom-range planning so non-empty text cannot silently send bare `Range1`, and combines `/status` with captured plus bounded recent-job workload evidence so externally started jobs show Busy.
 - Wails migration architecture, invariants, stage gates, beta risk, and rollback policy are recorded in `docs/wails3-migration-plan.md`.
-- Stages 1 and 2 are complete: platform-neutral planning, attribute semantics, run-mode metadata, resource limits, automation execution, lifecycle/readback orchestration, result recording, and typed events now live under `internal/application`; Gio remains the production adapter and fallback.
+- Stages 1 through 3 are complete: platform-neutral planning, execution, lifecycle/readback, typed events, connection state, monitoring policy/generation guards, preset mapping, and administration safeguards now live under `internal/application`; Gio remains the production adapter and fallback.
 - Implementation commits:
   - `1d4044a feat: add categorized constraint-aware capability metadata`
   - `c6f2a3e feat: add secure local settings preset store`
@@ -43,7 +43,11 @@ Updated: 2026-09-02
 - `application.Runner` uses narrow authenticated-client and result-recorder ports, owns the bounded worker pool and each import/update/lifecycle/readback/result path, and closes the JSONL recorder before publishing terminal state.
 - Runner operations have stable IDs, cancellation, immutable request snapshots, non-blocking event dispatch, coalesced progress, and lossless result/terminal events. Event payloads exclude credential/header data.
 - Deterministic fake-client tests cover Hold/RIP success, terminal lifecycle failures, strict set/get, server presets, expected-constraint cleanup, cancellation, per-job panic recovery, result-storage errors, worker bounds, and typed event delivery.
-- `internal/appgio` converts Gio widget state to application DTOs, binds `fiery.Client` plus session to the runner port, consumes typed events, and retains adapter tests. No business logic was introduced in TypeScript.
+- Exact-draft connection testing/application and blank credential replacement are authoritative in `application.ConnectionState`; snapshots expose only safe configured flags and active address.
+- Overview polling cadence, bounded 64-job probes, capped backoff, external/application Busy composition, and stale-update generations are shared application policy/state.
+- Safe local-preset capture and reconciliation now canonicalize current wire values, migrate legacy page-range data, clamp limits, reject stale options/server presets/modes, and report skipped values before Gio mutates controls.
+- Administration interlocks, server-bound expiring inventory leases, exact confirmation, count revalidation, clear acceptance, empty verification, and recovery status polling are headlessly tested application safeguards.
+- `internal/appgio` converts Gio widget state to application DTOs, binds Fiery HTTP/session adapters, consumes typed events, invokes native confirmations, and retains adapter tests. No business logic was introduced in TypeScript.
 
 ### Workspace UX
 
@@ -106,7 +110,7 @@ Updated: 2026-09-02
 
 ## Validation
 
-The following passed again after the Stage 2 platform-neutral execution-runner extraction:
+The following passed again after the Stage 3 state, monitoring, preset, and administration extraction:
 
 - `gofmt -w internal`
 - `go test ./...`
@@ -123,9 +127,11 @@ The following passed again after the Stage 2 platform-neutral execution-runner e
 - Embedded-secret byte verification without printing the key
 - GUI startup smoke test, no `cmd`/`curl`/PowerShell child process, graceful `WM_CLOSE`, exit code 0
 
-Stage 2 secret-injected GUI checkpoint (Windows GUI subsystem 2, 17,301,504 bytes; UTC build timestamp `2026-09-02T05:43:05.3804399Z`) SHA-256:
+Stage 3 secret-injected GUI checkpoint (Windows GUI subsystem 2, 17,337,856 bytes; UTC build timestamp `2026-09-02T05:57:10.0508582Z`) SHA-256:
 
-`52585D12DCC4D948EFD295994FF48DE4FF99291AD6A76006777AE53531E09A87`
+`8914D0C83F7AF6A88616773ACC2C9FA643F76FE46E2663B50D3A864970ACB019`
+
+Stage 2 checkpoint SHA-256: `52585D12DCC4D948EFD295994FF48DE4FF99291AD6A76006777AE53531E09A87`
 
 Stage 1 checkpoint SHA-256: `2D57547E850F4CA5F62C0FF3DAECB3D3F5CBCF74CD7D874C7CD189C6A9A0607E`
 
@@ -147,7 +153,7 @@ Stable rollback executable SHA-256 remains:
 - Wails 3 is currently available as beta through `v3.0.0-beta.16`, not a GA release. It will be pinned exactly and introduced only after backend extraction.
 - `refactor/platform-neutral-core` is the active implementation branch. Gio remains the production shell and must pass every extraction gate.
 - The target is a platform-neutral `internal/application` layer, followed by a separate `feature/wails3-ui` branch and side-by-side Windows parity before macOS packaging.
-- Stages 1 and 2 are complete and validated. Stage 3 is next: extract connection approval/invalidation, workload monitoring, safe preset mapping, and guarded administration workflows.
+- Stages 1 through 3 are complete and validated. Stage 4 is next: remove temporary compatibility mirrors, run the extracted-core integration gate, merge to `main`, tag the checkpoint, and push.
 - Full sequencing and verification requirements are in `docs/wails3-migration-plan.md`.
 
 ## Recommended live validation

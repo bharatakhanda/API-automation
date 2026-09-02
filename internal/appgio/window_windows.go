@@ -155,10 +155,11 @@ type Window struct {
 	testIntent          automationTestIntent
 	constraintMode      constraintTestMode
 	serverPresetGroup   widget.Enum
-	activeServer        model.ServerConnection
-	hasActiveServer     bool
+	activeServer        model.ServerConnection // compatibility mirror; application state is authoritative
+	hasActiveServer     bool                   // compatibility mirror for existing Gio rendering/tests
 	configuredSecret    string
-	testedConnectionKey string
+	testedConnectionKey string // compatibility mirror retained through core extraction
+	connectionState     *application.ConnectionState
 
 	capabilities          capabilities.Model
 	selected              map[string]map[string]*widget.Bool
@@ -192,8 +193,8 @@ type Window struct {
 	healthCheckedAt       time.Time
 	healthLatency         time.Duration
 	healthCancel          context.CancelFunc
-	healthGeneration      uint64
-	capabilityGeneration  uint64
+	healthGuard           *application.GenerationGuard
+	capabilityGuard       *application.GenerationGuard
 	captureActive         bool
 	captureProgress       float32
 	capturePhase          string
@@ -209,6 +210,7 @@ type Window struct {
 	resultStoreError      string
 	lastRun               reportxlsx.Summary
 	adminStatus           string
+	adminState            *application.AdministrationState
 	adminInventoryServer  string
 	adminInventoryAt      time.Time
 	adminJobCount         int
@@ -272,6 +274,10 @@ func New() *Window {
 		testIntent: testIntentPositive, constraintMode: constraintValidationOnly,
 		activeCapabilityGroup: "Job Info", activePage: pageConnection,
 		configuredSecret: fiery.DefaultSecretKey,
+		connectionState:  application.NewConnectionState(fiery.DefaultSecretKey),
+		healthGuard:      new(application.GenerationGuard),
+		capabilityGuard:  new(application.GenerationGuard),
+		adminState:       new(application.AdministrationState),
 		status:           "Test and approve a server connection to begin.", diagnostic: newDiagnosticLog(),
 		appContext: appContext, appCancel: appCancel,
 	}
@@ -621,6 +627,7 @@ func (w *Window) resetSelections() {
 	}
 	w.jobActionID.SetText("")
 	w.adminConfirmation.SetText("")
+	w.administrationBackend().InvalidateInventory()
 	w.mu.Lock()
 	w.adminInventoryServer = ""
 	w.adminInventoryAt = time.Time{}
@@ -1320,11 +1327,8 @@ func (w *Window) testServerConnection() {
 		w.setServerTestStatus("Missing server details")
 		return
 	}
-	testedKey := connectionKey(server)
-	w.mu.Lock()
-	w.serverTestOK = false
-	w.testedConnectionKey = ""
-	w.mu.Unlock()
+	w.connectionBackend().BeginTest()
+	w.syncConnectionMirror()
 	if !w.testingServer.CompareAndSwap(false, true) {
 		return
 	}
@@ -1336,29 +1340,23 @@ func (w *Window) testServerConnection() {
 		defer cancel()
 		client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
 		if err != nil {
-			w.mu.Lock()
-			w.serverTestOK = false
-			w.testedConnectionKey = ""
-			w.mu.Unlock()
+			w.connectionBackend().CompleteTest(server, false, "Connection failed")
+			w.syncConnectionMirror()
 			w.setServerTestStatus("Connection failed")
 			w.setStatus("Server test failed: " + err.Error())
 			w.addLog("Server connection test failed: %v", err)
 			return
 		}
 		if _, err := client.Login(ctx); err != nil {
-			w.mu.Lock()
-			w.serverTestOK = false
-			w.testedConnectionKey = ""
-			w.mu.Unlock()
+			w.connectionBackend().CompleteTest(server, false, "Authentication failed")
+			w.syncConnectionMirror()
 			w.setServerTestStatus("Authentication failed")
 			w.setStatus("Server test failed: " + err.Error())
 			w.addLog("Server connection test failed: %v", err)
 			return
 		}
-		w.mu.Lock()
-		w.serverTestOK = true
-		w.testedConnectionKey = testedKey
-		w.mu.Unlock()
+		w.connectionBackend().CompleteTest(server, true, "Connection OK · press OK to apply")
+		w.syncConnectionMirror()
 		w.setServerTestStatus("Connection OK · press OK to apply")
 		w.setStatus("Server connection passed. Press OK to use this connection.")
 		w.addLog("Server connection test passed for %s", server.IPAddress)
@@ -1519,7 +1517,10 @@ func (w *Window) captureCapabilities() {
 		}
 		w.mu.Lock()
 		w.capabilities = model
-		w.capabilityGeneration++
+		if w.capabilityGuard == nil {
+			w.capabilityGuard = new(application.GenerationGuard)
+		}
+		w.capabilityGuard.Next()
 		w.mu.Unlock()
 		w.setCaptureProgress(true, 1.0, "Capabilities loaded successfully.")
 		w.setStatus("Capabilities loaded. Preflight: " + env.OverallStatus)
@@ -2198,18 +2199,16 @@ func relatedReadbackMap(attrs map[string]string) map[string]string {
 }
 
 func (w *Window) connectionDraft() (model.ServerConnection, bool) {
-	s := w.draftConnectionUnchecked()
-	if s.IPAddress == "" || s.SecretKey == "" || s.Password == "" {
-		w.setStatus("Server address, configured or replacement secret key, and administrator password are required.")
+	draft := w.draftConnectionUnchecked()
+	if err := application.ValidateConnectionDraft(draft); err != nil {
+		w.setStatus(capitalizeStatus(err.Error()) + ".")
 		return model.ServerConnection{}, false
 	}
-	return s, true
+	return draft, true
 }
 
 func (w *Window) server() (model.ServerConnection, bool) {
-	w.mu.Lock()
-	s, ok := w.activeServer, w.hasActiveServer
-	w.mu.Unlock()
+	s, ok := w.connectionBackend().Active()
 	if !ok {
 		w.setStatus("Test the server connection and press OK before continuing.")
 		return model.ServerConnection{}, false
@@ -2258,10 +2257,6 @@ func runModesIncludeAction(modes []runMode, action string) bool {
 
 func combinationsRequireRipReadback(combos []combinations.Combination) bool {
 	return application.CombinationsRequireRIPReadback(combos)
-}
-
-func copiesOption(model capabilities.Model) (capabilities.Option, bool) {
-	return application.CopiesOption(model)
 }
 
 func (w *Window) logSelectedCombinations(combos []combinations.Combination, axes []combinations.Axis) {
@@ -2497,9 +2492,8 @@ func (w *Window) setStatus(s string) {
 }
 
 func (w *Window) setServerTestStatus(s string) {
-	w.mu.Lock()
-	w.serverTestStatus = s
-	w.mu.Unlock()
+	w.connectionBackend().SetTestStatus(s)
+	w.syncConnectionMirror()
 	w.diagnostic.printf("SERVER_TEST: %s", s)
 	w.invalidate()
 }

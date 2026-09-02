@@ -4,11 +4,10 @@ package appgio
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
 	"time"
 
+	"api-automation/internal/application"
 	"api-automation/internal/fiery"
 	"api-automation/internal/model"
 
@@ -16,8 +15,8 @@ import (
 )
 
 const (
-	clearAllJobsConfirmation = "CLEAR ALL JOBS"
-	jobInventoryValidity     = 2 * time.Minute
+	clearAllJobsConfirmation = application.ClearAllJobsConfirmation
+	jobInventoryValidity     = application.DefaultInventoryValidity
 )
 
 func (w *Window) administrationCard(gtx layout.Context) layout.Dimensions {
@@ -197,23 +196,12 @@ func (w *Window) startClearAllJobs() {
 	if !ok {
 		return
 	}
-	if w.adminConfirmation.Text() != clearAllJobsConfirmation {
-		w.setAdminStatus("Clear all jobs blocked: enter the exact uppercase confirmation phrase.")
+	inventory, err := w.administrationBackend().ValidateClear(server.IPAddress, w.adminConfirmation.Text(), time.Now(), jobInventoryValidity)
+	if err != nil {
+		w.setAdminStatus(capitalizeStatus(err.Error()) + ".")
 		return
 	}
-	w.mu.Lock()
-	inventoryServer := w.adminInventoryServer
-	inventoryAt := w.adminInventoryAt
-	jobCount := w.adminJobCount
-	w.mu.Unlock()
-	if inventoryServer != server.IPAddress || inventoryAt.IsZero() || time.Since(inventoryAt) > jobInventoryValidity {
-		w.setAdminStatus("Clear all jobs blocked: inspect the current job count for this server first.")
-		return
-	}
-	if jobCount == 0 {
-		w.setAdminStatus("There are no inspected jobs to clear.")
-		return
-	}
+	jobCount := inventory.Count
 	confirmed, err := confirmDestructiveAction(
 		"Permanently clear all Fiery jobs",
 		fmt.Sprintf("Permanently remove all %d job(s) currently inspected on %s?\n\nThis affects every user and cannot be undone. Accounting and configuration will not be cleared.", jobCount, server.IPAddress),
@@ -246,24 +234,12 @@ func (w *Window) startClearAllJobs() {
 			w.finishClearAllJobs(server.IPAddress, false, fmt.Errorf("login: %w", err))
 			return
 		}
-		jobs, err := client.ListJobs(ctx, session)
-		if err != nil {
-			w.finishClearAllJobs(server.IPAddress, false, fmt.Errorf("revalidate job inventory: %w", err))
-			return
+		outcome, clearErr := application.RevalidateAndClearJobs(ctx, fieryJobAdministrationClient{client: client, session: session}, jobCount, 2*time.Second)
+		if outcome.UpdateInventory {
+			w.recordJobInventory(server.IPAddress, outcome.Remaining)
 		}
-		if len(jobs) != jobCount {
-			w.recordJobInventory(server.IPAddress, len(jobs))
-			w.finishClearAllJobs(server.IPAddress, false, fmt.Errorf("job count changed from %d to %d; inspect and confirm again", jobCount, len(jobs)))
-			return
-		}
-		if err := client.ClearAllJobs(ctx, session); err != nil {
-			w.finishClearAllJobs(server.IPAddress, false, err)
-			return
-		}
-		remaining, err := waitForEmptyJobInventory(ctx, client, session)
-		w.recordJobInventory(server.IPAddress, remaining)
-		if err != nil {
-			w.finishClearAllJobs(server.IPAddress, true, err)
+		if clearErr != nil {
+			w.finishClearAllJobs(server.IPAddress, outcome.Accepted, clearErr)
 			return
 		}
 		w.finishClearAllJobs(server.IPAddress, true, nil)
@@ -271,18 +247,10 @@ func (w *Window) startClearAllJobs() {
 }
 
 func (w *Window) serverAdministrationPrecondition() error {
-	switch {
-	case w.running.Load():
-		return errors.New("server administration is blocked while capability capture or automation is running")
-	case w.managingJob.Load():
-		return errors.New("server administration is blocked while a manual job action is running")
-	case w.testingServer.Load():
-		return errors.New("server administration is blocked while the connection test is running")
-	case w.managingServer.Load() || w.inspectingJobs.Load():
-		return errors.New("wait for the current server administration operation to finish")
-	default:
-		return nil
-	}
+	return application.AdministrationPrecondition(application.AdministrationActivity{
+		AutomationRunning: w.running.Load(), ManualJobAction: w.managingJob.Load(), ConnectionTest: w.testingServer.Load(),
+		ServerOperation: w.managingServer.Load(), InventoryOperation: w.inspectingJobs.Load(),
+	})
 }
 
 func (w *Window) finishServerControl(action, server string, accepted bool, err error) {
@@ -333,16 +301,30 @@ func (w *Window) setAdminStatus(status string) {
 	w.setStatus(status)
 }
 
-func (w *Window) recordJobInventory(server string, count int) {
+func (w *Window) administrationBackend() *application.AdministrationState {
 	w.mu.Lock()
-	w.adminInventoryServer = server
-	w.adminInventoryAt = time.Now()
-	w.adminJobCount = count
+	defer w.mu.Unlock()
+	if w.adminState == nil {
+		w.adminState = new(application.AdministrationState)
+		if w.adminInventoryServer != "" && !w.adminInventoryAt.IsZero() {
+			w.adminState.RecordInventory(w.adminInventoryServer, w.adminJobCount, w.adminInventoryAt)
+		}
+	}
+	return w.adminState
+}
+
+func (w *Window) recordJobInventory(server string, count int) {
+	snapshot := w.administrationBackend().RecordInventory(server, count, time.Now())
+	w.mu.Lock()
+	w.adminInventoryServer = snapshot.Server
+	w.adminInventoryAt = snapshot.Inspected
+	w.adminJobCount = snapshot.Count
 	w.mu.Unlock()
 	w.invalidate()
 }
 
 func (w *Window) invalidateJobInventory() {
+	w.administrationBackend().InvalidateInventory()
 	w.mu.Lock()
 	w.adminInventoryServer = ""
 	w.adminInventoryAt = time.Time{}
@@ -355,67 +337,37 @@ func newFieryClient(server model.ServerConnection) (*fiery.Client, error) {
 }
 
 func waitForFieryRecovery(ctx context.Context, server model.ServerConnection) error {
-	// Avoid treating the still-running pre-action process as recovered before the
-	// restart/reboot has had time to begin.
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(10 * time.Second):
-	}
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-	var lastErr error
-	for {
-		attemptContext, cancel := context.WithTimeout(ctx, 25*time.Second)
-		client, err := newFieryClient(server)
-		if err == nil {
-			var session fiery.Session
-			session, err = client.Login(attemptContext)
-			if err == nil {
-				var status string
-				status, err = client.ServerStatus(attemptContext, session)
-				if err == nil {
-					normalized := strings.ToLower(strings.TrimSpace(status))
-					if normalized == "running" || normalized == "started" || normalized == "ready" {
-						cancel()
-						return nil
-					}
-					err = fmt.Errorf("fiery status is %q", status)
-				}
-			}
-		}
-		cancel()
-		lastErr = err
-		select {
-		case <-ctx.Done():
-			if lastErr != nil {
-				return fmt.Errorf("%w (last recovery check: %v)", ctx.Err(), lastErr)
-			}
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
+	return application.WaitForRecovery(ctx, fieryRecoveryProbe{server: server}, application.DefaultRecoveryPolicy())
 }
 
-func waitForEmptyJobInventory(ctx context.Context, client *fiery.Client, session fiery.Session) (int, error) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	remaining := -1
-	for {
-		jobs, err := client.ListJobs(ctx, session)
-		if err == nil {
-			remaining = len(jobs)
-			if remaining == 0 {
-				return 0, nil
-			}
-		}
-		select {
-		case <-ctx.Done():
-			if err != nil {
-				return max(remaining, 0), fmt.Errorf("verify empty job inventory: %w", err)
-			}
-			return max(remaining, 0), fmt.Errorf("verify empty job inventory: %w with %d job(s) remaining", ctx.Err(), remaining)
-		case <-ticker.C:
-		}
+type fieryRecoveryProbe struct {
+	server model.ServerConnection
+}
+
+func (probe fieryRecoveryProbe) Probe(ctx context.Context) (string, error) {
+	attemptContext, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+	client, err := newFieryClient(probe.server)
+	if err != nil {
+		return "", err
 	}
+	session, err := client.Login(attemptContext)
+	if err != nil {
+		return "", err
+	}
+	return client.ServerStatus(attemptContext, session)
+}
+
+type fieryJobAdministrationClient struct {
+	client  *fiery.Client
+	session fiery.Session
+}
+
+func (client fieryJobAdministrationClient) JobCount(ctx context.Context) (int, error) {
+	jobs, err := client.client.ListJobs(ctx, client.session)
+	return len(jobs), err
+}
+
+func (client fieryJobAdministrationClient) ClearAllJobs(ctx context.Context) error {
+	return client.client.ClearAllJobs(ctx, client.session)
 }

@@ -4,14 +4,10 @@ package appgio
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
-	"api-automation/internal/combinations"
-	"api-automation/internal/copyvalues"
-	"api-automation/internal/pagevalues"
+	"api-automation/internal/application"
 	"api-automation/internal/presets"
-	"api-automation/internal/rangevalues"
 )
 
 func (w *Window) saveCurrentPreset() {
@@ -37,39 +33,27 @@ func (w *Window) saveCurrentPreset() {
 	w.mu.Lock()
 	model := w.capabilities
 	w.mu.Unlock()
-	selected := make(map[string][]string)
+	selected := make(map[string][]string, len(w.selected))
 	for optionID, values := range w.selected {
-		if _, exists := model.OptionByID(optionID); !exists {
-			continue
-		}
-		if chosen := selectedValues(values); len(chosen) > 0 {
-			sort.Strings(chosen)
-			selected[optionID] = chosen
-		}
+		selected[optionID] = selectedValues(values)
 	}
-	numeric := make(map[string]string)
-	if option, ok := copiesOption(model); ok {
-		numeric[option.ID] = strings.TrimSpace(w.copiesInput.Text())
-	}
+	numeric := make(map[string]string, len(w.numericInputs))
 	for optionID, input := range w.numericInputs {
-		if value := strings.TrimSpace(input.Text()); value != "" {
-			numeric[optionID] = value
+		if input != nil {
+			numeric[optionID] = input.Text()
 		}
-	}
-	if value := strings.TrimSpace(w.pageRangeInput.Text()); value != "" && customPageRangeSupported(model) {
-		numeric[pageRangeOptionID] = value
 	}
 	serverPresetID := ""
 	if selectedPreset, err := w.selectedServerPreset(model); err == nil && selectedPreset != nil {
 		serverPresetID = selectedPreset.ID
 	}
-	preset := presets.Preset{
-		Name: name, ServerName: model.ServerName, ServerSerial: model.SerialNumber, ServerPresetID: serverPresetID,
-		SelectedValues: selected, NumericInputs: numeric,
-		Strategy: string(w.strategy), ValueSource: string(w.valueSource), TestIntent: string(w.testIntent), ConstraintMode: string(w.constraintMode),
-		MaxCases: strings.TrimSpace(w.maxCases.Text()), ParallelJobs: strings.TrimSpace(w.workers.Text()),
-		RunModes: runModeLabels(w.selectedRunModes()), FileMode: w.fileModeGroup.Value,
-	}
+	preset := application.BuildSafePreset(model, application.PresetCaptureRequest{
+		Name: name, SelectedValues: selected, NumericInputs: numeric,
+		CopiesInput: w.copiesInput.Text(), CustomPageRange: w.pageRangeInput.Text(),
+		Strategy: w.strategy, ValueSource: w.valueSource, TestIntent: w.testIntent, ConstraintMode: w.constraintMode,
+		MaxCases: w.maxCases.Text(), ParallelJobs: w.workers.Text(), RunModes: w.selectedRunModes(), FileMode: w.fileModeGroup.Value,
+		ServerPresetID: serverPresetID,
+	})
 	if err := w.presetStore.Save(preset); err != nil {
 		w.setStatus("Preset save failed: " + err.Error())
 		return
@@ -93,117 +77,59 @@ func (w *Window) loadNamedPreset() {
 	w.mu.Lock()
 	model := w.capabilities
 	w.mu.Unlock()
+	reconciled := application.ReconcilePreset(model, preset)
 	w.resetSelections()
-	missing := 0
-	for optionID, values := range preset.SelectedValues {
-		option, exists := model.OptionByID(optionID)
-		if !exists || option.Range != nil {
-			missing += len(values)
-			continue
-		}
+	for optionID, values := range reconciled.SelectedValues {
+		option, _ := model.OptionByID(optionID)
 		available := checkboxOptionValues(option)
 		ensureBools(w.selected, optionID, available)
 		for _, value := range values {
-			if !containsOptionValue(available, optionID, value) {
-				missing++
-				continue
-			}
-			for _, current := range available {
-				if optionValueMatches(optionID, current, value) {
-					w.selected[optionID][current].Value = true
-					break
-				}
-			}
+			w.selected[optionID][value].Value = true
 		}
 	}
-	for optionID, value := range preset.NumericInputs {
-		if strings.EqualFold(optionID, pageRangeOptionID) || strings.EqualFold(optionID, pageRangeLegacyDataID) {
-			if !customPageRangeSupported(model) {
-				missing++
-				continue
-			}
-			if _, err := pagevalues.Parse(value, pagevalues.DefaultExpansionLimit); err != nil {
-				missing++
-				continue
-			}
-			w.pageRangeInput.SetText(value)
-			continue
-		}
-		if isCopiesOption(optionID) {
-			if _, err := copyvalues.Parse(value); err != nil {
-				missing++
-				continue
-			}
-			w.copiesInput.SetText(value)
-			continue
-		}
-		option, exists := model.OptionByID(optionID)
-		if !exists || option.Range == nil {
-			missing++
-			continue
-		}
-		bounds := rangevalues.Bounds{Min: option.Range.Min, Max: option.Range.Max, Increment: option.Range.Increment, Precision: option.Range.Precision}
-		if _, err := rangevalues.Parse(value, bounds, rangevalues.DefaultExpansionLimit); err != nil {
-			missing++
-			continue
-		}
+	for optionID, value := range reconciled.NumericInputs {
 		w.numericInput(optionID).SetText(value)
 	}
-	switch combinations.Strategy(preset.Strategy) {
-	case combinations.StrategySingle, combinations.StrategySelected, combinations.StrategyAll, combinations.StrategyPairwise, combinations.StrategyRandom:
-		w.strategy = combinations.Strategy(preset.Strategy)
+	w.copiesInput.SetText(reconciled.CopiesInput)
+	w.pageRangeInput.SetText(reconciled.CustomPageRange)
+	if reconciled.HasStrategy {
+		w.strategy = reconciled.Strategy
 	}
-	switch automationValueSource(preset.ValueSource) {
-	case valueSourceBaseline, valueSourceDefaults, valueSourceSelected, valueSourceAdvertised:
-		w.valueSource = automationValueSource(preset.ValueSource)
+	if reconciled.HasValueSource {
+		w.valueSource = reconciled.ValueSource
 	}
-	switch automationTestIntent(preset.TestIntent) {
-	case testIntentPositive, testIntentConstraint:
-		w.testIntent = automationTestIntent(preset.TestIntent)
+	if reconciled.HasTestIntent {
+		w.testIntent = reconciled.TestIntent
 	}
-	switch constraintTestMode(preset.ConstraintMode) {
-	case constraintValidationOnly, constraintControlledApply:
-		w.constraintMode = constraintTestMode(preset.ConstraintMode)
+	if reconciled.HasConstraintMode {
+		w.constraintMode = reconciled.ConstraintMode
 	}
-	if value := strings.TrimSpace(preset.MaxCases); value != "" {
-		w.maxCases.SetText(strconvItoa(parseCaseLimit(value)))
+	if reconciled.MaxCases != "" {
+		w.maxCases.SetText(strconvItoa(parseCaseLimit(reconciled.MaxCases)))
 	}
-	if value := strings.TrimSpace(preset.ParallelJobs); value != "" {
-		w.workers.SetText(strconvItoa(parseWorkerCount(value)))
+	if reconciled.ParallelJobs != "" {
+		w.workers.SetText(strconvItoa(parseWorkerCount(reconciled.ParallelJobs)))
 	}
-	if preset.FileMode == "all" || preset.FileMode == "single" || preset.FileMode == "random" {
-		w.fileModeGroup.Value = preset.FileMode
+	if reconciled.FileMode != "" {
+		w.fileModeGroup.Value = reconciled.FileMode
 	}
-	if preset.ServerPresetID != "" {
-		found := false
-		for _, serverPreset := range model.ServerPresets {
-			if serverPreset.ID == preset.ServerPresetID {
-				w.serverPresetGroup.Value = serverPreset.ID
-				found = true
-				break
-			}
-		}
-		if !found {
-			missing++
-		}
+	if reconciled.ServerPresetID != "" {
+		w.serverPresetGroup.Value = reconciled.ServerPresetID
 	}
-	selectedModes := make(map[string]struct{}, len(preset.RunModes))
-	for _, label := range preset.RunModes {
+	selectedModes := make(map[string]struct{}, len(reconciled.RunModeLabels))
+	for _, label := range reconciled.RunModeLabels {
 		selectedModes[label] = struct{}{}
 	}
 	for index, mode := range runModes {
 		_, w.modeChecks[index].Value = selectedModes[mode.Label]
 	}
-	if len(selectedModes) == 0 && len(w.modeChecks) > 0 {
-		w.modeChecks[0].Value = true
-	}
 	w.presetName.SetText(preset.Name)
 	message := fmt.Sprintf("Loaded preset %q", preset.Name)
-	if preset.ServerSerial != "" && model.SerialNumber != "" && !strings.EqualFold(preset.ServerSerial, model.SerialNumber) {
+	if reconciled.DifferentServer {
 		message += "; warning: it was saved for a different Fiery server"
 	}
-	if missing > 0 {
-		message += fmt.Sprintf("; skipped %d unavailable or invalid value(s)", missing)
+	if reconciled.Missing > 0 {
+		message += fmt.Sprintf("; skipped %d unavailable or invalid value(s)", reconciled.Missing)
 	}
 	w.setStatus(message)
 	w.addLog("%s", message)

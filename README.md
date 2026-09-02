@@ -49,7 +49,7 @@ go build -trimpath -ldflags "-s -w -H=windowsgui" -o bin/api-automation.exe ./cm
 cmd/api-automation             GUI entrypoint
 cmd/fiery-readback-probe       Standalone diagnostic probe
 internal/appgio                Gio desktop UI and execution adapter
-internal/application           Platform-neutral planning, runner, typed events, lifecycle, and limits
+internal/application           Platform-neutral planning, runner, state, lifecycle, safeguards, and events
 internal/fiery                 Fiery HTTP client and capability discovery
 internal/capabilities          Capability normalization and taxonomy
 internal/combinations          Bounded Cartesian, pairwise, and random generation
