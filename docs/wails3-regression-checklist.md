@@ -18,7 +18,7 @@ This is the parity gate for the validated Gio fallback and each Wails preview bu
 - [x] Exact Wails runtime/CLI `v3.0.0-beta.16` pin and byte-reproducible name-based bindings
 - [x] Frontend lockfile/audit, JavaScript syntax, no source maps, and no configured-secret bytes in assets
 - [x] Distinct production-tag Wails preview build, visual startup inspection, and graceful no-shell-child close
-- [x] Backend-owned file resolution, exact custom-range planning, preset reconciliation, run-mode rejection, typed event/state cloning, credential redaction, and administration interlock tests
+- [x] Backend-owned file resolution, exact custom-range planning, preset reconciliation, run-mode rejection, typed event/state cloning, credential redaction, administration interlocks, and generated connection-DTO field contract tests
 - [x] Gio and Wails preview simultaneous side-by-side startup and graceful close
 
 ## Live Fiery parity checks

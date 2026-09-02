@@ -53,12 +53,12 @@ function updateConnection(connection) {
   state.connection = connection;
   const connected = Boolean(connection.hasActive);
   const badge = byId("connection-badge");
-  badge.textContent = connected ? `Connected · ${connection.activeIPAddress}` : "Not connected";
+  badge.textContent = connected ? `Connected · ${connection.activeIpAddress}` : "Not connected";
   badge.className = `badge ${connected ? "good" : "neutral"}`;
-  byId("apply-connection").disabled = !connection.testOK;
+  byId("apply-connection").disabled = !connection.testOk;
   byId("test-state").textContent = connection.testStatus || "Not tested";
   byId("cancel-change").hidden = !connection.changing;
-  if (!byId("server-ip").value && connection.activeIPAddress) byId("server-ip").value = connection.activeIPAddress;
+  if (!byId("server-ip").value && connection.activeIpAddress) byId("server-ip").value = connection.activeIpAddress;
   updateGates();
 }
 
@@ -97,16 +97,16 @@ async function applyConnection() {
   try {
     const result = await Service.ApplyConnection(draft()); updateConnection(result.connection);
     if (result.changed) { capabilityView = undefined; resetCapabilityForm(); populateCapabilityGroups(); renderCapabilities(); populateServerPresets(); }
-    byId("secret-key").value = ""; byId("password").value = ""; notice(result.message); appendLog(`Applied connection ${result.connection.activeIPAddress}.`);
+    byId("secret-key").value = ""; byId("password").value = ""; notice(result.message); appendLog(`Applied connection ${result.connection.activeIpAddress}.`);
     await showPage("overview");
   } catch (error) { notice(`Connection was not applied: ${errorText(error)}`, true); }
-  finally { setBusy(button, false, ""); button.disabled = !state.connection.testOK; }
+  finally { setBusy(button, false, ""); button.disabled = !state.connection.testOk; }
 }
 
 async function cancelConnectionChange() {
   try {
     const result = await Service.CancelConnectionChange(); updateConnection(result.connection);
-    byId("server-ip").value = result.connection.activeIPAddress || ""; byId("secret-key").value = ""; byId("password").value = "";
+    byId("server-ip").value = result.connection.activeIpAddress || ""; byId("secret-key").value = ""; byId("password").value = "";
     notice(result.message); if (result.connection.hasActive) await showPage("overview");
   } catch (error) { notice(errorText(error), true); }
 }

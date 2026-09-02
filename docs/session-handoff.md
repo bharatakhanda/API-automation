@@ -60,6 +60,7 @@ Updated: 2026-09-02
 - Wails runtime and CLI are exactly pinned to `v3.0.0-beta.16`; the previous machine-wide alpha CLI was replaced before binding generation.
 - `cmd/api-automation-wails` embeds a dependency-free, npm-lockfile-controlled frontend and uses the distinct `API Automation Preview` identity and `api-automation-wails-preview.exe` output.
 - `internal/appwails.Service` exposes credential-safe DTOs for exact-draft connection state, bounded external-workload monitoring, native file selection, normalized capabilities, safe local presets, backend planning, automation events/cancellation, disk-backed results/Excel export, manual job actions, and guarded administration. Credentials and session cookies remain private Go state and are absent from response DTOs/assets.
+- The Wails connection gate consumes the generated JSON names `testOk` and `activeIpAddress`. A prior casing mismatch (`testOK`/`activeIPAddress`) left Apply disabled after a successful test; `frontend_contract_test.go` now rejects those non-generated names.
 - Generated name-based bindings use the bundled Wails runtime, are byte-for-byte reproducible, and include no source maps. `tools/build-wails-preview.ps1` verifies the CLI pin, lockfile install, frontend secret absence, Windows subsystem, and embedded backend secret without printing it.
 - The frontend receives run modes, worker/case limits, and monitor cadence from Go. It snapshots selections into DTOs and does not reimplement planning, wire serialization, constraint, lifecycle, or administration semantics.
 - Wails intentionally uses a simpler modern desktop visual system rather than copying Gio: restrained surfaces, compact 36px content-width actions, consistent 40px fields, fixed-height Browse buttons, responsive wrapping, visible focus, and unambiguous hidden/disabled/destructive states.
@@ -146,9 +147,9 @@ The following passed again after Stage 6 Wails Windows-parity implementation:
 - Exact Wails CLI/runtime `v3.0.0-beta.16` pin, deterministic bundled-runtime binding regeneration, npm lock/audit, JavaScript syntax, and no-source-map checks
 - Secret-safe production-tag Wails preview build, visual inspection, no-shell-child startup, and graceful `WM_CLOSE`
 
-Latest Wails preview checkpoint with the modern compact UI and executable-adjacent Windows debug evidence (Windows GUI subsystem 2, 14,702,080 bytes; UTC build timestamp `2026-09-02T07:58:30.6079084Z`) SHA-256:
+Latest Wails preview checkpoint with the corrected Apply-connection gate, modern compact UI, and executable-adjacent Windows debug evidence (Windows GUI subsystem 2, 14,702,080 bytes; UTC build timestamp `2026-09-02T08:31:11.8270459Z`) SHA-256:
 
-`D0D48F836CE34D6A71AE951C26518CD3315528F314E45A375F6A7F8BD333B9E5`
+`1DB737AE93907249675350B918CEA5A6860CF290D300CF98C222200FD24B2290`
 
 Stage 6 Gio fallback checkpoint (Windows GUI subsystem 2, 17,332,224 bytes; UTC build timestamp `2026-09-02T06:57:58.8838041Z`) SHA-256:
 
