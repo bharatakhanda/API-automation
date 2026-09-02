@@ -59,6 +59,14 @@ func FromSnapshot(snapshot fiery.CapabilitySnapshot) Model {
 			model.Queues = parseQueues(endpoint.Body)
 		case "presets", "v5_presets":
 			model.ServerPresets = fiery.ParseServerPresets(endpoint.Body)
+		case "jobs", "v5_jobs":
+			if workload, err := fiery.ParseJobWorkload(endpoint.Body); err == nil {
+				model.JobsTotal = workload.TotalItems
+				model.ActiveJobs = workload.ActiveJobs
+				model.ActiveJobID = workload.EvidenceID
+				model.ActiveJobStatus = workload.EvidenceStatus
+				model.ActiveJobState = workload.EvidenceState
+			}
 		case "properties", "v5_properties", "v4_properties":
 			options := parseProperties(endpoint.Body)
 			if len(options) > len(model.Options) {

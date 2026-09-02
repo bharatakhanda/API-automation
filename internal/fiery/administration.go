@@ -210,6 +210,126 @@ type ServerActivityStatus struct {
 	Workload string
 }
 
+// JobWorkloadSummary is a bounded view of Fiery's job inventory used to
+// distinguish controller health from actual spooling, RIP, and print activity.
+type JobWorkloadSummary struct {
+	TotalItems     int
+	InspectedItems int
+	ActiveJobs     int
+	Offset         int
+	EvidenceID     string
+	EvidenceStatus string
+	EvidenceState  string
+}
+
+// ParseJobWorkload summarizes a captured /jobs response without retaining job
+// content or ticket attributes.
+func ParseJobWorkload(body []byte) (JobWorkloadSummary, error) {
+	var payload struct {
+		Data struct {
+			TotalItems any              `json:"totalItems"`
+			Items      []map[string]any `json:"items"`
+		} `json:"data"`
+		Items []map[string]any `json:"items"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return JobWorkloadSummary{}, errors.New("fiery job workload response was not valid JSON")
+	}
+	items := payload.Data.Items
+	if items == nil {
+		items = payload.Items
+	}
+	if items == nil {
+		return JobWorkloadSummary{}, errors.New("fiery job workload response did not contain an items array")
+	}
+	total := len(items)
+	if parsed, err := strconv.Atoi(cleanScalar(payload.Data.TotalItems)); err == nil && parsed >= 0 {
+		total = parsed
+	}
+	summary := JobWorkloadSummary{TotalItems: total, InspectedItems: len(items)}
+	for _, item := range items {
+		if !jobIsActive(item) {
+			continue
+		}
+		summary.ActiveJobs++
+		if summary.EvidenceID == "" {
+			summary.EvidenceID = firstMapScalar(item, "id")
+			summary.EvidenceStatus = firstMapScalar(item, "status", "display status")
+			summary.EvidenceState = firstMapScalar(item, "state")
+		}
+	}
+	return summary, nil
+}
+
+// ProbeRecentJobWorkload requests only the newest bounded inventory window.
+// Fiery returns jobs in creation order, so active jobs created by CWS or another
+// client are normally in this tail window. Both offset and start are supplied
+// for compatibility with Fiery releases that use either pagination spelling.
+func (c *Client) ProbeRecentJobWorkload(ctx context.Context, session Session, knownTotal, limit int) (JobWorkloadSummary, error) {
+	if limit < 1 {
+		limit = 64
+	}
+	offset := knownTotal - limit
+	if offset < 0 {
+		offset = 0
+	}
+	query := url.Values{
+		"limit":  []string{strconv.Itoa(limit)},
+		"offset": []string{strconv.Itoa(offset)},
+		"start":  []string{strconv.Itoa(offset)},
+	}
+	body, err := c.v5JSONRequest(ctx, session, http.MethodGet, "/jobs", query, nil)
+	if err != nil {
+		return JobWorkloadSummary{}, err
+	}
+	summary, err := ParseJobWorkload(body)
+	if err != nil {
+		return JobWorkloadSummary{}, err
+	}
+	summary.Offset = offset
+	if summary.InspectedItems > limit {
+		return summary, fmt.Errorf("fiery ignored bounded job pagination: requested at most %d item(s), received %d", limit, summary.InspectedItems)
+	}
+	return summary, nil
+}
+
+func jobIsActive(item map[string]any) bool {
+	for _, key := range []string{
+		"is spooling?", "is ripping?", "is printing?", "is waiting to rip?",
+		"is waiting to print?", "queued for printing?", "raster busy?",
+	} {
+		if value, ok := lookupMapValue(item, key); ok && scalarTruthy(cleanScalar(value)) {
+			return true
+		}
+	}
+	// JOBIS can remain JOB_IS_RIPPING after a job reaches done ripping, so it
+	// is historical evidence and must not drive the live Overview state.
+	for _, value := range []string{
+		firstMapScalar(item, "status", "display status"),
+		firstMapScalar(item, "state"),
+	} {
+		value = strings.ToLower(strings.TrimSpace(value))
+		for _, active := range []string{
+			"spooling", "ripping", "processing", "printing", "waiting to rip",
+			"waiting to process", "waiting to print", "sending to press",
+		} {
+			if value == active || strings.HasPrefix(value, active+" ") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func scalarTruthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *Client) ServerStatus(ctx context.Context, session Session) (string, error) {
 	activity, err := c.ServerActivityStatus(ctx, session)
 	return activity.Health, err

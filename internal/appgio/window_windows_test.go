@@ -160,8 +160,12 @@ func TestOverviewLabelsAndServerFormatting(t *testing.T) {
 	if state, detail := effectiveOverviewServerState("Idle", "API running", true); state != "Busy" || !strings.Contains(detail, "automation active") {
 		t.Fatalf("active automation state = %q detail=%q", state, detail)
 	}
-	if overviewStatusPollInterval != time.Second {
-		t.Fatalf("overview polling interval = %s", overviewStatusPollInterval)
+	workload := fiery.JobWorkloadSummary{TotalItems: 638, ActiveJobs: 4, EvidenceStatus: "ripping", EvidenceState: "processing"}
+	if state, detail := effectiveOverviewServerStateWithJobs("Idle", "API running", workload); state != "Busy" || !strings.Contains(detail, "4 active job") || !strings.Contains(detail, "ripping/processing") {
+		t.Fatalf("external Fiery workload state = %q detail=%q", state, detail)
+	}
+	if overviewStatusPollInterval != time.Second || overviewJobPollInterval != 2*time.Second || overviewJobProbeLimit != 64 {
+		t.Fatalf("overview polling intervals status=%s jobs=%s limit=%d", overviewStatusPollInterval, overviewJobPollInterval, overviewJobProbeLimit)
 	}
 	window := &Window{}
 	window.running.Store(true)
@@ -329,7 +333,7 @@ func TestLoadPresetRestoresSafeSettingsAndPreservesCredentials(t *testing.T) {
 func TestCustomPageRangeUsesDirectEFPageRangeAndValidatesImportedPageCount(t *testing.T) {
 	window := &Window{
 		selected: map[string]map[string]*widget.Bool{pageRangeOptionID: {
-			"All": {}, "Odd": {}, "Even": {}, pageRangeRangeValue: {},
+			"All": {}, "Odd": {Value: true}, "Even": {}, pageRangeRangeValue: {Value: true},
 		}},
 		capabilities: capabilities.Model{Options: []capabilities.Option{
 			{ID: pageRangeOptionID, Label: "Page range", Value: "All", Values: []string{"All", "Odd", "Even", pageRangeRangeValue}},
@@ -348,7 +352,7 @@ func TestCustomPageRangeUsesDirectEFPageRangeAndValidatesImportedPageCount(t *te
 	}
 	attributes := combinationToAttributes(generated[0])
 	if attributes[pageRangeOptionID] != "1,3,5-7" {
-		t.Fatalf("custom page-range attributes = %#v", attributes)
+		t.Fatalf("custom page-range did not replace checked exact values: %#v", attributes)
 	}
 	if _, exists := attributes[pageRangeLegacyDataID]; exists {
 		t.Fatalf("legacy page-range companion was synthesized: %#v", attributes)

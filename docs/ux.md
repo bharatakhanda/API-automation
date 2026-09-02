@@ -31,7 +31,7 @@ Overview is a compact readiness dashboard rather than another settings form:
 - Capability readiness, Automation Progress, and the separately scoped **Reset Job Properties**, **Reset Automation**, and **Reset Files** actions use a denser three-card row on wide windows.
 - Current Configuration and Administration promotional cards and the Continue to Test Settings footer are intentionally absent; Administration remains available from the dedicated sidebar page.
 
-One centralized monitor reuses a Fiery client/session and polls documented `/live/api/v5/status` every second only while Overview is visible. Every request records an `OVERVIEW_STATUS_POLL` diagnostic. API health plus `fieryExtendedStatus` normally produces **Idle**, **Busy**, or **Unavailable**, but an active application automation run forces **Busy** so a stale `running/none` response cannot mask processing. Failures back off to 30 seconds; the dashboard never downloads the full jobs inventory.
+One centralized monitor reuses a Fiery client/session and polls documented `/live/api/v5/status` every second only while Overview is visible. After capability discovery has completed, it also uses the captured job workload and a bounded 64-job tail probe every two seconds so jobs started from CWS or another client can drive **Busy** even when `/status` remains `running/none`. `OVERVIEW_STATUS_POLL` and `OVERVIEW_JOB_POLL` record the evidence; ignored pagination and request failures back off to 30 seconds instead of repeatedly downloading the full inventory. Active application automation remains an immediate Busy override.
 
 ### Test Settings
 
@@ -53,7 +53,7 @@ Lifecycle, concurrency, test intent, and generation do not appear here.
 - Search spans labels, API IDs, categories, defaults, and values.
 - Properties remain vertically stacked under Fiery sections, with exact API IDs and every eligible advertised value preserved.
 - Reusable local preset controls and the read-only Fiery server-preset selector each appear once above the categories, not inside every category.
-- Numeric, Copies, Scale, and page-range validation retain server-aware safety bounds. Exact advertised `EFPageRange` values—including `Range1`—remain independent options. When range-capable metadata is present, custom expressions are normalized, checked against `OrigPageCount`, sent directly as `EFPageRange`, and verified from that same field; `DPP_PAGE_RANGE` is never sent or accepted as substitute readback.
+- Numeric, Copies, Scale, and page-range validation retain server-aware safety bounds. Exact advertised `EFPageRange` values—including `Range1`—remain available when custom text is blank. A non-empty custom expression is the sole page-range value for that plan, preventing Single Configuration from silently sending bare `Range1`; it is normalized, checked against `OrigPageCount`, sent directly as `EFPageRange`, and verified from that same field. `DPP_PAGE_RANGE` is never sent or accepted as substitute readback.
 - `EFOutProfile` labels hide the server's leading `U+FEFF`, while automation preserves that code point on the wire so CWS receives the exact advertised profile identity.
 
 ### Automation

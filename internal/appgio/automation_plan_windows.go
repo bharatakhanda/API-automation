@@ -210,23 +210,25 @@ func (w *Window) valuesForSource(model capabilities.Model, option capabilities.O
 	}
 
 	if isPageRangeOption(option.ID) {
-		if source == valueSourceAdvertised {
-			return checkboxOptionValues(option), false, nil
+		customInput := strings.TrimSpace(w.pageRangeInput.Text())
+		if customInput != "" {
+			if !customPageRangeSupported(model) {
+				return nil, false, fmt.Errorf("page range: this Fiery does not advertise a range-capable %s value; arbitrary custom ranges are disabled", pageRangeOptionID)
+			}
+			selection, err := pagevalues.Parse(customInput, pagevalues.DefaultExpansionLimit)
+			if err != nil {
+				return nil, false, fmt.Errorf("page range: %w", err)
+			}
+			// A populated text field is an explicit custom-range request. Do not
+			// also plan the bare Range1 enum (or another checked enum): Single
+			// Configuration could otherwise send Range1 and RIP the full job while
+			// the UI claims that it planned Custom(...).
+			return []string{pageRangeInternalPrefix + selection.Normalized}, false, nil
 		}
 		values := selectedValues(w.selected[option.ID])
-		customInput := strings.TrimSpace(w.pageRangeInput.Text())
-		if customInput == "" {
-			sort.Strings(values)
-			return values, false, nil
+		if source == valueSourceAdvertised {
+			values = checkboxOptionValues(option)
 		}
-		if !customPageRangeSupported(model) {
-			return nil, false, fmt.Errorf("page range: this Fiery does not advertise a range-capable %s value; arbitrary custom ranges are disabled", pageRangeOptionID)
-		}
-		selection, err := pagevalues.Parse(customInput, pagevalues.DefaultExpansionLimit)
-		if err != nil {
-			return nil, false, fmt.Errorf("page range: %w", err)
-		}
-		values = append(values, pageRangeInternalPrefix+selection.Normalized)
 		sort.Strings(values)
 		return values, false, nil
 	}

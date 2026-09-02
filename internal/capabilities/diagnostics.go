@@ -51,6 +51,11 @@ type normalizationReport struct {
 	DiskTotal        int64                     `json:"diskTotal,omitempty"`
 	MemoryAvailable  int64                     `json:"memoryAvailable,omitempty"`
 	MemoryTotal      int64                     `json:"memoryTotal,omitempty"`
+	JobsTotal        int                       `json:"jobsTotal,omitempty"`
+	ActiveJobs       int                       `json:"activeJobs,omitempty"`
+	ActiveJobID      string                    `json:"activeJobId,omitempty"`
+	ActiveJobStatus  string                    `json:"activeJobStatus,omitempty"`
+	ActiveJobState   string                    `json:"activeJobState,omitempty"`
 	Queues           []Queue                   `json:"queues,omitempty"`
 	FilterSummary    FilterSummary             `json:"filterSummary"`
 	DisplayedOptions []DisplayedOptionDecision `json:"displayedOptions"`
@@ -145,6 +150,11 @@ func SaveNormalizationReport(model Model, capturedAt time.Time, dir string) (str
 		DiskTotal:        model.DiskTotal,
 		MemoryAvailable:  model.MemoryAvailable,
 		MemoryTotal:      model.MemoryTotal,
+		JobsTotal:        model.JobsTotal,
+		ActiveJobs:       model.ActiveJobs,
+		ActiveJobID:      model.ActiveJobID,
+		ActiveJobStatus:  model.ActiveJobStatus,
+		ActiveJobState:   model.ActiveJobState,
 		Queues:           model.Queues,
 		FilterSummary:    audit.Summary,
 		DisplayedOptions: audit.DisplayedOptions,

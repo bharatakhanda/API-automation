@@ -16,6 +16,11 @@ type Model struct {
 	DiskTotal       int64
 	MemoryAvailable int64
 	MemoryTotal     int64
+	JobsTotal       int
+	ActiveJobs      int
+	ActiveJobID     string
+	ActiveJobStatus string
+	ActiveJobState  string
 	Queues          []Queue
 	ServerPresets   []fiery.ServerPreset
 	Options         []Option

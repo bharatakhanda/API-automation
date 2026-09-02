@@ -193,6 +193,7 @@ type Window struct {
 	healthLatency         time.Duration
 	healthCancel          context.CancelFunc
 	healthGeneration      uint64
+	capabilityGeneration  uint64
 	captureActive         bool
 	captureProgress       float32
 	capturePhase          string
@@ -1146,7 +1147,7 @@ func (w *Window) pageRangeOptionRow(gtx layout.Context, opt capabilities.Option)
 			items = append(items,
 				layout.Rigid(label(w.theme, "Custom page range", 14, palette.text).Layout),
 				layout.Rigid(spacer(3)),
-				layout.Rigid(label(w.theme, "Enter pages like 1,3,5-8 or 5 to 8. The text is validated against each imported file's original page count and sent directly as EFPageRange. DPP_PAGE_RANGE is never sent.", 13, palette.muted).Layout),
+				layout.Rigid(label(w.theme, "Enter pages like 1,3,5-8 or 5 to 8. A non-empty custom range replaces the exact server menu values for this run, is validated against each imported file's original page count, and is sent directly as EFPageRange. DPP_PAGE_RANGE is never sent.", 13, palette.muted).Layout),
 				layout.Rigid(spacer(7)),
 				layout.Rigid(fieldBox(w.theme, "Custom page range", "1,3,5-8", &w.pageRangeInput, 620)),
 			)
@@ -1618,6 +1619,7 @@ func (w *Window) captureCapabilities() {
 		}
 		w.mu.Lock()
 		w.capabilities = model
+		w.capabilityGeneration++
 		w.mu.Unlock()
 		w.setCaptureProgress(true, 1.0, "Capabilities loaded successfully.")
 		w.setStatus("Capabilities loaded. Preflight: " + env.OverallStatus)
@@ -1646,6 +1648,7 @@ func (w *Window) setCaptureProgress(active bool, progress float32, phase string)
 func (w *Window) logCapabilitySummary(model capabilities.Model) {
 	groups := capabilities.GroupedOptions(model)
 	w.addLog("Discovered server %s press=%s serial=%s version=%s queues=%d server_presets=%d applicable_options=%d excluded_schema_entries=%d groups=%d", fallback(model.ServerName, "unknown"), fallback(model.PressModel, "unknown"), fallback(model.SerialNumber, "unknown"), fallback(model.Version, "unknown"), len(model.Queues), len(model.ServerPresets), len(model.Options), len(model.ExcludedOptions), len(groups))
+	w.diagnostic.printf("CAPABILITY_JOB_WORKLOAD: total=%d active=%d evidence_id=%q evidence_status=%q evidence_state=%q", model.JobsTotal, model.ActiveJobs, model.ActiveJobID, model.ActiveJobStatus, model.ActiveJobState)
 	w.logCapabilityFilterAudit(model)
 	w.logExcludedCapabilitySummary(model.ExcludedOptions, model.ExcludedValues)
 	for _, group := range groups {

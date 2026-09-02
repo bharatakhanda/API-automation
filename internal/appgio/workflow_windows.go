@@ -140,6 +140,7 @@ func (w *Window) invalidateServerDependentState() {
 	w.stopOverviewHealthMonitor()
 	w.mu.Lock()
 	w.capabilities = capabilities.Model{}
+	w.capabilityGeneration++
 	w.adminInventoryServer = ""
 	w.adminInventoryAt = time.Time{}
 	w.adminJobCount = 0
@@ -461,6 +462,21 @@ func (w *Window) jobAutomationActive() bool {
 	capabilityCaptureActive := w.captureActive
 	w.mu.Unlock()
 	return !capabilityCaptureActive
+}
+
+func effectiveOverviewServerStateWithJobs(apiState, apiDetail string, workload fiery.JobWorkloadSummary) (string, string) {
+	if workload.ActiveJobs < 1 {
+		return apiState, apiDetail
+	}
+	detail := strings.TrimSpace(apiDetail)
+	if detail == "" {
+		detail = "Fiery API status pending"
+	}
+	evidence := strings.Trim(strings.Join([]string{workload.EvidenceStatus, workload.EvidenceState}, "/"), "/")
+	if evidence == "" {
+		evidence = "active job"
+	}
+	return "Busy", fmt.Sprintf("%s · Fiery inventory reports %d active job(s): %s", detail, workload.ActiveJobs, evidence)
 }
 
 func effectiveOverviewServerState(apiState, apiDetail string, automationActive bool) (string, string) {
@@ -861,7 +877,11 @@ func (w *Window) stopOverviewHealthMonitor() {
 	}
 }
 
-const overviewStatusPollInterval = time.Second
+const (
+	overviewStatusPollInterval = time.Second
+	overviewJobPollInterval    = 2 * time.Second
+	overviewJobProbeLimit      = 64
+)
 
 func (w *Window) startOverviewHealthMonitor() {
 	server, ok := w.server()
@@ -890,7 +910,27 @@ func (w *Window) monitorServerHealth(ctx context.Context, generation uint64, ser
 	}
 	var session fiery.Session
 	failures := 0
+	jobProbeFailures := 0
+	var observedCapabilityGeneration uint64
+	var jobWorkload fiery.JobWorkloadSummary
+	nextJobProbe := time.Now()
 	for {
+		w.mu.Lock()
+		capabilityGeneration := w.capabilityGeneration
+		capabilityModel := w.capabilities
+		w.mu.Unlock()
+		capabilitiesLoaded := len(capabilityModel.Options) > 0
+		if capabilityGeneration != observedCapabilityGeneration {
+			observedCapabilityGeneration = capabilityGeneration
+			jobWorkload = fiery.JobWorkloadSummary{
+				TotalItems: capabilityModel.JobsTotal, ActiveJobs: capabilityModel.ActiveJobs,
+				EvidenceID: capabilityModel.ActiveJobID, EvidenceStatus: capabilityModel.ActiveJobStatus,
+				EvidenceState: capabilityModel.ActiveJobState,
+			}
+			nextJobProbe = time.Now()
+			jobProbeFailures = 0
+		}
+
 		started := time.Now()
 		attemptContext, cancel := context.WithTimeout(ctx, 20*time.Second)
 		var activity fiery.ServerActivityStatus
@@ -900,6 +940,29 @@ func (w *Window) monitorServerHealth(ctx context.Context, generation uint64, ser
 		}
 		if err == nil {
 			activity, err = client.ServerActivityStatus(attemptContext, session)
+		}
+		if err == nil && capabilitiesLoaded && !time.Now().Before(nextJobProbe) {
+			probe, probeErr := client.ProbeRecentJobWorkload(attemptContext, session, jobWorkload.TotalItems, overviewJobProbeLimit)
+			if probeErr != nil {
+				// If this Fiery ignored pagination but still returned a valid
+				// inventory, use that evidence once and back off aggressively rather
+				// than discarding externally started job activity.
+				if probe.InspectedItems > 0 {
+					jobWorkload = probe
+				}
+				jobProbeFailures++
+				probeDelay := time.Duration(1<<minInt(jobProbeFailures, 4)) * overviewJobPollInterval
+				if probeDelay > 30*time.Second {
+					probeDelay = 30 * time.Second
+				}
+				nextJobProbe = time.Now().Add(probeDelay)
+				w.diagnostic.printf("OVERVIEW_JOB_POLL: endpoint=/live/api/v5/jobs bounded=true result=error failures=%d next=%s error=%q", jobProbeFailures, probeDelay, short(probeErr.Error(), 220))
+			} else {
+				jobProbeFailures = 0
+				jobWorkload = probe
+				nextJobProbe = time.Now().Add(overviewJobPollInterval)
+				w.diagnostic.printf("OVERVIEW_JOB_POLL: endpoint=/live/api/v5/jobs bounded=true result=ok offset=%d limit=%d inspected=%d total=%d active=%d evidence_id=%q evidence_status=%q evidence_state=%q next=%s", probe.Offset, overviewJobProbeLimit, probe.InspectedItems, probe.TotalItems, probe.ActiveJobs, probe.EvidenceID, probe.EvidenceStatus, probe.EvidenceState, overviewJobPollInterval)
+			}
 		}
 		cancel()
 		latency := time.Since(started)
@@ -917,9 +980,10 @@ func (w *Window) monitorServerHealth(ctx context.Context, generation uint64, ser
 			failures = 0
 			apiState := fallback(activity.Workload, "Idle")
 			detail := fmt.Sprintf("API /status health %s · extended status %s", fallback(activity.Health, "not reported"), fallback(activity.Extended, "not reported"))
+			state, detail := effectiveOverviewServerStateWithJobs(apiState, detail, jobWorkload)
 			jobAutomationActive := w.jobAutomationActive()
-			state, detail := effectiveOverviewServerState(apiState, detail, jobAutomationActive)
-			w.diagnostic.printf("OVERVIEW_STATUS_POLL: endpoint=/live/api/v5/status result=ok health=%q extended=%q api_workload=%q job_automation_active=%t displayed=%q next=%s latency=%s", activity.Health, activity.Extended, apiState, jobAutomationActive, state, delay, latency.Round(time.Millisecond))
+			state, detail = effectiveOverviewServerState(state, detail, jobAutomationActive)
+			w.diagnostic.printf("OVERVIEW_STATUS_POLL: endpoint=/live/api/v5/status result=ok health=%q extended=%q api_workload=%q inventory_active=%d inventory_total=%d inventory_evidence=%q job_automation_active=%t displayed=%q next=%s latency=%s", activity.Health, activity.Extended, apiState, jobWorkload.ActiveJobs, jobWorkload.TotalItems, jobWorkload.EvidenceStatus, jobAutomationActive, state, delay, latency.Round(time.Millisecond))
 			w.setHealthSnapshot(generation, state, detail, latency)
 		}
 		timer := time.NewTimer(delay)

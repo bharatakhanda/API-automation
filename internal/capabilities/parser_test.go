@@ -14,6 +14,7 @@ func TestFromSnapshotExtractsServerQueuesAndOptions(t *testing.T) {
 	snapshot := fiery.CapabilitySnapshot{Endpoints: []fiery.EndpointSnapshot{
 		{Name: "info", Body: raw(`{"data":{"item":{"name":"SERVER-85","serial_number":"P00014754","version":"1.4","timezone":"Pacific Standard Time (-0700)","locale":"English_United States.1252","uptime":12345,"disk_available":1000,"disk_total":2000,"memory_available":3000,"memory_total":4000}}}`)},
 		{Name: "queues", Body: raw(`{"data":{"items":[{"id":1,"name":"hold","available":true,"editable":true},{"id":2,"name":"font","available":false,"editable":true}]}}`)},
+		{Name: "jobs", Body: raw(`{"data":{"totalItems":2,"items":[{"id":"JOB-1","status":"done spooling"},{"id":"JOB-2","status":"ripping","state":"processing"}]}}`)},
 		{Name: "properties", Body: raw(`{"data":{"items":[{"id":"EFResolution","group":"fpimage","ppdtype":"uimenu","value":"360x360dpi","values":["360x360dpi","360x720dpi"],"scopes":["ps","command","fpimage","uimenu"]},{"id":"EFColorMode","group":"fpcolorwise","ppdtype":"uimenu","value":"CMYK","values":["CMYK","CMYKPLUS"],"scopes":["ps","rerip","fpcolorwise","uimenu"]},{"id":"Ignored","value":"x","values":["x"],"scopes":["ps"]}]}}`)},
 	}}
 
@@ -23,6 +24,9 @@ func TestFromSnapshotExtractsServerQueuesAndOptions(t *testing.T) {
 	}
 	if len(model.Queues) != 2 || model.Queues[0].Name != "hold" || !model.Queues[0].Available {
 		t.Fatalf("unexpected queues: %#v", model.Queues)
+	}
+	if model.JobsTotal != 2 || model.ActiveJobs != 1 || model.ActiveJobID != "JOB-2" || model.ActiveJobStatus != "ripping" {
+		t.Fatalf("unexpected captured job workload: %#v", model)
 	}
 	if option, ok := model.OptionByID("EFResolution"); !ok || len(option.Values) != 2 {
 		t.Fatalf("missing resolution option: %#v", model.Options)

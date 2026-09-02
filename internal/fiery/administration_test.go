@@ -112,6 +112,55 @@ func TestServerAdministrationUsesOnlyDocumentedV5Operations(t *testing.T) {
 	}
 }
 
+func TestJobWorkloadDetectsExternalRIPAndUsesBoundedTailProbe(t *testing.T) {
+	payload := []byte(`{"data":{"totalItems":3,"items":[
+		{"id":"1","status":"done ripping","state":"processed","is ripping?":"no","JOBIS":"JOB_IS_RIPPING"},
+		{"id":"2","status":"waiting to rip","state":"waiting to process"},
+		{"id":"3","status":"ripping","state":"processing","is ripping?":"yes"}
+	]}}`)
+	summary, err := ParseJobWorkload(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.TotalItems != 3 || summary.InspectedItems != 3 || summary.ActiveJobs != 2 || summary.EvidenceID != "2" {
+		t.Fatalf("job workload = %#v", summary)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != apiV5+"/jobs" || r.URL.Query().Get("limit") != "64" || r.URL.Query().Get("offset") != "36" || r.URL.Query().Get("start") != "36" {
+			t.Fatalf("unexpected workload probe: %s", r.URL.String())
+		}
+		_, _ = w.Write([]byte(`{"data":{"totalItems":100,"items":[{"id":"99","status":"printing","state":"printing"}]}}`))
+	}))
+	defer server.Close()
+	client, err := New(Config{ServerIP: server.URL, SecretKey: "secret", Password: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe, err := client.ProbeRecentJobWorkload(context.Background(), Session{Cookie: "session=abc"}, 100, 64)
+	if err != nil || probe.Offset != 36 || probe.ActiveJobs != 1 || probe.TotalItems != 100 {
+		t.Fatalf("probe=%#v err=%v", probe, err)
+	}
+}
+
+func TestBoundedJobProbeRejectsIgnoredPagination(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		items := make([]map[string]string, 65)
+		for index := range items {
+			items[index] = map[string]string{"id": string(rune('A' + index%26)), "status": "done spooling"}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"totalItems": 65, "items": items}})
+	}))
+	defer server.Close()
+	client, err := New(Config{ServerIP: server.URL, SecretKey: "secret", Password: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ProbeRecentJobWorkload(context.Background(), Session{}, 65, 64); err == nil {
+		t.Fatal("ignored pagination was accepted as a bounded workload probe")
+	}
+}
+
 func TestFieryWorkloadStateUsesExtendedAPIStatus(t *testing.T) {
 	for _, test := range []struct {
 		health, extended, want string
