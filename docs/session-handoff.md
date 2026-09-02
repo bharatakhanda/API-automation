@@ -62,6 +62,7 @@ Updated: 2026-09-02
 - `internal/appwails.Service` exposes credential-safe DTOs for exact-draft connection state, bounded external-workload monitoring, native file selection, normalized capabilities, safe local presets, backend planning, automation events/cancellation, disk-backed results/Excel export, manual job actions, and guarded administration. Credentials and session cookies remain private Go state and are absent from response DTOs/assets.
 - Generated name-based bindings use the bundled Wails runtime, are byte-for-byte reproducible, and include no source maps. `tools/build-wails-preview.ps1` verifies the CLI pin, lockfile install, frontend secret absence, Windows subsystem, and embedded backend secret without printing it.
 - The frontend receives run modes, worker/case limits, and monitor cadence from Go. It snapshots selections into DTOs and does not reimplement planning, wire serialization, constraint, lifecycle, or administration semantics.
+- Wails intentionally uses a simpler modern desktop visual system rather than copying Gio: restrained surfaces, compact 36px content-width actions, consistent 40px fields, fixed-height Browse buttons, responsive wrapping, visible focus, and unambiguous hidden/disabled/destructive states.
 - Preview presets, JSONL results, and diagnostics use the distinct `API Automation Wails Preview` configuration directory; Wails does not mutate Gio's existing settings.
 - Automation drains typed shared-runner events, retains at most 500 live rows/1,000 live logs, preserves all result records on disk, and waits up to five seconds for cancellation/finalization during shutdown.
 
@@ -145,9 +146,9 @@ The following passed again after Stage 6 Wails Windows-parity implementation:
 - Exact Wails CLI/runtime `v3.0.0-beta.16` pin, deterministic bundled-runtime binding regeneration, npm lock/audit, JavaScript syntax, and no-source-map checks
 - Secret-safe production-tag Wails preview build, visual inspection, no-shell-child startup, and graceful `WM_CLOSE`
 
-Stage 6 Wails preview checkpoint (Windows GUI subsystem 2, 14,695,424 bytes; UTC build timestamp `2026-09-02T07:02:59.4867495Z`) SHA-256:
+Latest Wails preview checkpoint with the modern compact UI (Windows GUI subsystem 2, 14,699,520 bytes; UTC build timestamp `2026-09-02T07:42:45.5094850Z`) SHA-256:
 
-`109281D6009B6442B925F1910A8189A26BB0776387788BB340B038D127E598D8`
+`91B9F9A36F713C9205962B619513D369C9BA7080CF25DE3BFE0546F8BD858417`
 
 Stage 6 Gio fallback checkpoint (Windows GUI subsystem 2, 17,332,224 bytes; UTC build timestamp `2026-09-02T06:57:58.8838041Z`) SHA-256:
 
