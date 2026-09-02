@@ -94,7 +94,7 @@ go run ./cmd/compare-automation-results \
 ## Remaining external release gates
 
 - Controlled live Fiery checks still require the operator server, credentials, approved files, and isolated destructive-test environment. Use `docs/wails3-regression-checklist.md`.
-- macOS builds must run natively. `.github/workflows/wails-macos.yml` builds arm64/x86_64 artifacts and a universal package; canonical-identity run `33623694302` passed.
+- macOS builds must run natively. `.github/workflows/wails-macos.yml` builds arm64/x86_64 artifacts and a universal package; post-merge `main` run `33624425597` passed.
 - Signed/notarized physical-Mac acceptance still requires Apple Developer credentials and supported Macs. Use `docs/wails3-macos-release.md`.
 
 These are release-evidence gates; they do not restore or require duplicate desktop source.
