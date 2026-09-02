@@ -1,21 +1,25 @@
 # Session handoff
 
-Updated: 2026-09-01
+Updated: 2026-09-02
 
 ## Project
 
 - Root: `C:\Users\harsh\Desktop\API_Automation`
 - Repository: `https://github.com/bharatakhanda/API-automation`
-- Branch: `main`
+- Stable branch: `main`
+- Active branch: `refactor/platform-neutral-core`
+- Stable baseline tag: `gio-stable-20260902`
 - Built EXE: `C:\Users\harsh\Desktop\API_Automation\bin\api-automation.exe`
 - Do not commit or push `DATA/`, `.local/`, captures, logs, result files, executables, or secrets.
-- Do not push unless the user explicitly requests it.
+- The user has explicitly authorized logical commits and pushes throughout the backend extraction and Wails 3 introduction. Report after each completed stage with pending work and the next task.
 - The Fiery secret key is injected into the EXE by linker flag from `.local/secrets.json`; it is not committed or printed.
 
 ## Git state at handoff
 
-- Local `main` is synchronized with `origin/main` after the user-requested logical commit and push; generated executables, captures, logs, results, `.local/`, and secrets remain excluded.
-- Latest implementation work: direct connection-gated navigation, compact Server Details, one-second documented `/status` polling with active-automation Busy override, staged connection replacement, documented-taxonomy-plus-metadata capability eligibility with schema-v3 UI audits, correct Fiery constraints, exact-wire `EFOutProfile`, direct validated `EFPageRange`, a 10-worker ceiling, presets, and guarded administration.
+- `main` and `origin/main` include `23b50dc`; generated executables, captures, logs, results, `.local/`, and secrets remain excluded.
+- `gio-stable-20260902` marks the validated rollback point before platform-neutral core extraction.
+- Latest implementation work fixes custom-range planning so non-empty text cannot silently send bare `Range1`, and combines `/status` with captured plus bounded recent-job workload evidence so externally started jobs show Busy.
+- Wails migration architecture, invariants, stage gates, beta risk, and rollback policy are recorded in `docs/wails3-migration-plan.md`.
 - Implementation commits:
   - `1d4044a feat: add categorized constraint-aware capability metadata`
   - `c6f2a3e feat: add secure local settings preset store`
@@ -25,7 +29,8 @@ Updated: 2026-09-01
   - `e304744 docs: document categorized constraint-aware automation`
   - `ab656bd feat: tighten Fiery capability filtering and diagnostics`
   - `4b0c1fd feat: improve Fiery workspace automation and live status`
-- The complete local history is pushed to `origin/main` as requested.
+  - `23b50dc fix: honor custom ranges and external Fiery workload`
+- The complete stable history and baseline tag are pushed to `origin`.
 
 ## Current implementation
 
@@ -35,7 +40,7 @@ Updated: 2026-09-01
 - No non-Connection page is accessible until the exact draft passes Test Connection and the user presses OK.
 - Existing passwords and secret/API keys are never repopulated into editors. The UI shows only Configured and accepts an optional replacement.
 - Server replacement is staged; the active connection remains authoritative until the tested draft is explicitly applied. A true server/credential change invalidates capabilities, server presets, Job Property widgets, job IDs, inventory, and cached health while preserving test files, automation choices, saved local presets, results, and logs.
-- Overview removes prior generic/promotional/footer and disk/memory elements. Its two header buttons match. One session-reusing monitor polls documented `/live/api/v5/status` every second while visible and emits `OVERVIEW_STATUS_POLL`; active application automation displays Busy even if API health is stale `running/none`, while failures retain adaptive backoff.
+- Overview removes prior generic/promotional/footer and disk/memory elements. Its two header buttons match. One session-reusing monitor polls documented `/live/api/v5/status` every second while visible. After capability discovery it initializes from captured job workload and probes a bounded 64-job tail every two seconds. `OVERVIEW_STATUS_POLL`, `CAPABILITY_JOB_WORKLOAD`, and `OVERVIEW_JOB_POLL` retain the evidence; external jobs and active application automation display Busy even if API health is stale `running/none`, while failures or ignored pagination back off.
 - Job Property categories use a compact fixed-width single horizontal row with count badges and narrow-window overflow. Local and Fiery preset controls appear once above the category row.
 - Automation independently selects Positive Validation or Expected Constraint Rejection; Server Baseline, Advertised Defaults, User-Selected Values, or All Advertised Values; and Single Configuration, All Combinations (Cartesian), Pairwise, or Bounded Random Sample.
 - Validation Only is the default constraint mode. Expected conflict is PASS, no conflict is FAIL, and timeout, unavailable endpoint, HTTP 500, unrelated rejection, server failure, or disposable-job cleanup failure is ERROR. Controlled Apply is explicitly advanced and accepts only evidenced client-side constraint rejections.
@@ -50,7 +55,7 @@ Updated: 2026-09-01
 - Common aliases are deduplicated while preserving exact server IDs for updates and readback.
 - `efirange` metadata retains min, max, increment, and precision and renders as a validated numeric field rather than checkboxes.
 - Numeric fields accept one value, comma-separated values, or inclusive ranges and remain bounded by 10,000 expanded values and Max cases.
-- Every advertised `EFPageRange` value, including `Range1`, remains an exact independent checkbox option. When `EFPageRange` advertises range capability, custom input is normalized, checked against the imported file's original page count, sent directly as `EFPageRange`, and strictly read back from that field. `DPP_PAGE_RANGE` is never emitted or accepted as substitute verification.
+- Every advertised `EFPageRange` value, including `Range1`, remains available as an exact option when custom text is blank. A non-empty custom input is the sole page-range value for that plan, is normalized, checked against the imported file's original page count, sent directly as `EFPageRange`, and strictly read back from that field. `DPP_PAGE_RANGE` is never emitted or accepted as substitute verification.
 - `EFOutProfile` preserves the server's leading U+FEFF on the update wire so CWS receives the exact advertised menu identity. The invisible code point is removed only from labels and readback/preset comparison.
 - Capability capture now writes a normalized decision report beside the raw snapshot, including full retained metadata for excluded options and their reasons.
 - Copies remains independently validated from 1 through 9999. Parallel Jobs is independently capped at 10 in the UI, preset restore, planning, and runtime worker pool.
@@ -105,22 +110,29 @@ The following passed after the workspace, constraint-intent, and press-applicabi
 - Embedded-secret byte verification without printing the key
 - GUI startup smoke test, no `cmd`/`curl`/PowerShell child process, graceful `WM_CLOSE`, exit code 0
 
-Built executable (Windows GUI subsystem 2, 17,195,520 bytes) SHA-256:
+Built executable at stable baseline (Windows GUI subsystem 2, 17,210,368 bytes) SHA-256:
 
-`795dac6af2e2fcf64c90b32d7a5059377e0a72fef627dd22805adc2bf7e3f5dc`
+`C4A16DDC2B74DC1C3F88CB702590B20EE05F45ED505E28BDADB07BC27A78A1D4`
 
 ### Latest copied test-machine evidence
 
 - `D:\api-automation.exe` matched the previous crashing-test build SHA-256 `58b4dadb4e4f0726dbda336f23d6caad1ff13fba4e3dda0d6c6af7c1a8c48571`; it does not contain the new page-range safety gate.
 - The latest copied 5,000-page run passed API set/get and lifecycle checks with `EFOutProfile` sent using the exact leading U+FEFF, and the operator confirmed CWS now shows the profile as selected.
 - The 19:34 schema-v3 live report proved the prior filter was active at 86 included/displayed / 179 excluded / zero removed / 25 constrained, but its exact UI audit exposed eight backend-only properties admitted by broad category fallback. The documented-taxonomy requirement now yields 78 / 187 / zero removed / 24 constrained; live UI confirmation remains required.
-- The subsequent page-range run planned `Custom(1-5)` but sent five attributes, including unadvertised `DPP_PAGE_RANGE="1-5"` plus `EFPageRange="Range1"`. The update returned success, then the log stopped immediately after RIP began; its JSONL result file is empty, consistent with the reported server crash.
+- The latest page-range failure planned `Custom(1-5)` but actually sent bare `EFPageRange="Range1"` (`custom=false`) because checked enum values and custom text shared one Single-Configuration axis. `23b50dc` fixes planning so non-empty custom text replaces enum values for that plan; live confirmation remains pending.
 - Capability discovery advertises `EFPageRange` values `All`, `Odd`, `Even`, and `Range1`, with `Range1` proving range-capable metadata. It does not advertise `DPP_PAGE_RANGE` as writable.
 - New CWS/Postman evidence for job `P00014754.6A9724A9.8301` shows `EFPageRange="5-10"`, `DPP_PAGE_RANGE=""`, `OrigPageCount=12`, and six generated/ripped pages. The implementation therefore sends normalized custom text directly as `EFPageRange`; it never maps custom text to `Range1` or emits the legacy companion.
 
-## Recommended next action
+## Wails 3 migration status
 
-Run a small live Fiery validation before a high-concurrency campaign:
+- Wails 3 is currently available as beta through `v3.0.0-beta.16`, not a GA release. It will be pinned exactly and introduced only after backend extraction.
+- `refactor/platform-neutral-core` is the active implementation branch. Gio remains the production shell and must pass every extraction gate.
+- The target is a platform-neutral `internal/application` layer, followed by a separate `feature/wails3-ui` branch and side-by-side Windows parity before macOS packaging.
+- Full sequencing and verification requirements are in `docs/wails3-migration-plan.md`.
+
+## Recommended live validation
+
+Run a small live Fiery validation before a high-concurrency campaign and before declaring Gio parity after extraction:
 
 1. Discover capabilities and confirm category/search/range rendering against the target server.
 2. Save and reload one local preset, then reconnect to a different Fiery or discovery snapshot to confirm stale-value reconciliation.
