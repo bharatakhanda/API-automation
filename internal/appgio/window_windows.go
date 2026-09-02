@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"math"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -20,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"api-automation/internal/application"
 	"api-automation/internal/capabilities"
 	"api-automation/internal/combinations"
 	"api-automation/internal/copyvalues"
@@ -45,16 +45,16 @@ import (
 )
 
 const (
-	pageRangeOptionID       = "EFPageRange"
-	pageRangeLegacyDataID   = "DPP_PAGE_RANGE"
-	pageRangeRangeValue     = "Range1"
-	pageRangeInternalPrefix = "__API_AUTOMATION_CUSTOM_PAGE_RANGE__:"
-	outputProfileOptionID   = "EFOutProfile"
+	pageRangeOptionID       = application.PageRangeOptionID
+	pageRangeLegacyDataID   = application.PageRangeLegacyDataID
+	pageRangeRangeValue     = application.PageRangeRangeValue
+	pageRangeInternalPrefix = application.PageRangeInternalPrefix
+	outputProfileOptionID   = application.OutputProfileOptionID
 	noServerPresetID        = "__API_AUTOMATION_NO_SERVER_PRESET__"
 
-	defaultCaseLimit       = 100
-	maxCaseLimit           = 10_000
-	maxWorkerCount         = 10
+	defaultCaseLimit       = application.DefaultCaseLimit
+	maxCaseLimit           = application.MaximumCaseLimit
+	maxWorkerCount         = application.MaximumWorkerCount
 	maxDisplayedResults    = 250
 	maxDisplayedLogLines   = 500
 	maxRetainedResults     = 2_000
@@ -74,27 +74,27 @@ const (
 	pageCount
 )
 
-type automationValueSource string
+type automationValueSource = application.ValueSource
 
 const (
-	valueSourceBaseline   automationValueSource = "baseline"
-	valueSourceDefaults   automationValueSource = "defaults"
-	valueSourceSelected   automationValueSource = "selected"
-	valueSourceAdvertised automationValueSource = "advertised"
+	valueSourceBaseline   = application.ValueSourceBaseline
+	valueSourceDefaults   = application.ValueSourceDefaults
+	valueSourceSelected   = application.ValueSourceSelected
+	valueSourceAdvertised = application.ValueSourceAdvertised
 )
 
-type automationTestIntent string
+type automationTestIntent = application.TestIntent
 
 const (
-	testIntentPositive   automationTestIntent = "positive"
-	testIntentConstraint automationTestIntent = "constraint"
+	testIntentPositive   = application.TestIntentPositive
+	testIntentConstraint = application.TestIntentConstraint
 )
 
-type constraintTestMode string
+type constraintTestMode = application.ConstraintMode
 
 const (
-	constraintValidationOnly  constraintTestMode = "validation"
-	constraintControlledApply constraintTestMode = "controlled_apply"
+	constraintValidationOnly  = application.ConstraintValidationOnly
+	constraintControlledApply = application.ConstraintControlledApply
 )
 
 var palette = struct {
@@ -258,10 +258,7 @@ type apiTraceReport struct {
 	Error            string             `json:"error,omitempty"`
 }
 
-type runMode struct {
-	Label, ImportQueue string
-	Actions            []string
-}
+type runMode = application.RunMode
 
 type lifecycleFailure struct {
 	outcome joboutcome.Outcome
@@ -270,18 +267,7 @@ type lifecycleFailure struct {
 
 func (e *lifecycleFailure) Error() string { return e.outcome.Summary() }
 
-var runModes = []runMode{
-	{Label: "Hold", ImportQueue: "hold"},
-	{Label: "Process and Hold", ImportQueue: "hold", Actions: []string{"rip"}},
-	{Label: "RIP", ImportQueue: "hold", Actions: []string{"rip"}},
-	{Label: "Press Print", ImportQueue: "hold", Actions: []string{"rip", "production", "press_print"}},
-	{Label: "Ready to Print", ImportQueue: "hold", Actions: []string{"rip", "production"}},
-	{Label: "Print", ImportQueue: "hold", Actions: []string{"rip", "production", "press_print", "print"}},
-	{Label: "Cancel while Processing/Ripping", ImportQueue: "hold", Actions: []string{"cancel_ripping"}},
-	{Label: "Cancel while Waiting to Print", ImportQueue: "hold", Actions: []string{"rip", "production", "cancel_waiting"}},
-	{Label: "Cancel while Printing", ImportQueue: "hold", Actions: []string{"rip", "production", "press_print", "cancel_printing"}},
-	{Label: "Delete", ImportQueue: "hold", Actions: []string{"delete"}},
-}
+var runModes = application.RunModes()
 
 func New() *Window {
 	appContext, appCancel := context.WithCancel(context.Background())
@@ -1214,19 +1200,15 @@ func (w *Window) copiesOptionRow(gtx layout.Context, opt capabilities.Option) la
 }
 
 func isCopiesOption(optionID string) bool {
-	return optionID == "num copies" || optionID == "EFCopies"
+	return application.IsCopiesOption(optionID)
 }
 
 func isPageRangeOption(optionID string) bool {
-	return strings.EqualFold(strings.TrimSpace(optionID), pageRangeOptionID)
+	return application.IsPageRangeOption(optionID)
 }
 
 func customPageRangeSupported(model capabilities.Model) bool {
-	option, exists := model.OptionByID(pageRangeOptionID)
-	// This Fiery's range-capable schema advertises Range1 and CWS materializes
-	// arbitrary selections such as 5-10 directly in EFPageRange. Do not enable
-	// free-form text on servers that advertise only All/Odd/Even semantics.
-	return exists && containsStringFold(option.Values, pageRangeRangeValue)
+	return application.CustomPageRangeSupported(model)
 }
 
 func (w *Window) resultsCard(gtx layout.Context) layout.Dimensions {
@@ -2435,79 +2417,30 @@ func (w *Window) logRawPostmanComparison(ctx context.Context, client *fiery.Clie
 }
 
 func validateCustomPageRange(attributes, jobAttributes map[string]string) error {
-	expression := strings.TrimSpace(attributes[pageRangeOptionID])
-	selection, err := pagevalues.Parse(expression, pagevalues.DefaultExpansionLimit)
-	if err != nil {
-		// All, Odd, Even, Range1, and any other exact server-advertised menu
-		// values are not arbitrary page expressions and need no page-count check.
-		return nil
-	}
-	pageCount, ok := importedFilePageCount(jobAttributes)
-	if !ok {
-		return fmt.Errorf("fiery did not report the imported file's original page count after spooling")
-	}
-	return selection.ValidatePageCount(pageCount)
+	return application.ValidateCustomPageRange(attributes, jobAttributes)
 }
 
 func importedFilePageCount(attributes map[string]string) (int, bool) {
-	for _, key := range []string{"OrigPageCount", "num document pages", "pqm num pages", "PGM num pages", "num pages"} {
-		value, err := strconv.Atoi(strings.TrimSpace(attributes[key]))
-		if err == nil && value > 0 {
-			return value, true
-		}
-	}
-	return 0, false
+	return application.ImportedFilePageCount(attributes)
 }
 
-func (w *Window) attributesMatch(got, expected map[string]string) bool {
-	for key, want := range expected {
-		if !w.expectedAttributeMatches(got, expected, key, want) {
-			return false
-		}
-	}
-	return true
-}
-
-func (w *Window) expectedAttributeMatches(got, _ map[string]string, key, want string) bool {
-	return w.attributeMapValueMatches(got, key, want)
-}
-
-func (w *Window) attributeMapValueMatches(got map[string]string, key, want string) bool {
-	if strings.EqualFold(key, pageRangeOptionID) {
-		if _, err := pagevalues.Parse(want, pagevalues.DefaultExpansionLimit); err == nil {
-			return pageRangeValueMatches(got, want)
-		}
-	}
-	return w.attributeValueMatches(key, got[key], want)
-}
-
-func pageRangeValueMatches(got map[string]string, want string) bool {
-	value := strings.TrimSpace(got[pageRangeOptionID])
-	if _, err := pagevalues.Parse(value, pagevalues.DefaultExpansionLimit); err != nil {
-		return false
-	}
-	return pagevalues.Equivalent(value, want)
-}
-
-func (w *Window) attributeValueMatches(key, got, want string) bool {
-	if strings.EqualFold(key, outputProfileOptionID) {
-		got = normalizeOutputProfileValue(got)
-		want = normalizeOutputProfileValue(want)
-	}
-	if got == want {
-		return true
-	}
-	// Fiery often omits job attributes whose value is the server default. Treat a
-	// missing/empty readback as a match only when the selected value equals the
-	// discovered default for that option.
-	if strings.TrimSpace(got) != "" {
-		return false
-	}
+func (w *Window) attributeMatcher() application.AttributeMatcher {
 	w.mu.Lock()
 	model := w.capabilities
 	w.mu.Unlock()
-	option, ok := model.OptionByID(key)
-	return ok && option.Value == want
+	return application.AttributeMatcher{Capabilities: model}
+}
+
+func (w *Window) attributesMatch(got, expected map[string]string) bool {
+	return w.attributeMatcher().AttributesMatch(got, expected)
+}
+
+func (w *Window) expectedAttributeMatches(got, _ map[string]string, key, want string) bool {
+	return w.attributeMatcher().AttributeMapValueMatches(got, key, want)
+}
+
+func (w *Window) attributeValueMatches(key, got, want string) bool {
+	return w.attributeMatcher().AttributeValueMatches(key, got, want)
 }
 
 func (w *Window) performModeLifecycle(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, mode runMode) error {
@@ -2700,34 +2633,15 @@ func cancelObserved(attrs map[string]string) bool {
 }
 
 func lifecyclePolicy(mode runMode) joboutcome.Policy {
-	policy := joboutcome.Policy{}
-	switch mode.Label {
-	case "Process and Hold", "RIP":
-		policy.RequireProcessedRaster = true
-	case "Print":
-		policy.RequirePrinted = true
-	case "Cancel while Processing/Ripping", "Cancel while Waiting to Print", "Cancel while Printing":
-		policy.ExpectCanceled = true
-	}
-	return policy
+	return application.LifecyclePolicy(mode)
 }
 
 func modeIncludesAction(mode runMode, want string) bool {
-	for _, action := range mode.Actions {
-		if action == want {
-			return true
-		}
-	}
-	return false
+	return application.ModeIncludesAction(mode, want)
 }
 
 func requiresRipReadback(key string) bool {
-	switch key {
-	case "EFPrintSpeed", "EFRotateDocument":
-		return true
-	default:
-		return false
-	}
+	return application.RequiresRIPReadback(key)
 }
 
 func relatedReadbackValues(attrs map[string]string) string {
@@ -2798,11 +2712,7 @@ func (w *Window) selectedRunModes() []runMode {
 }
 
 func runModeLabels(modes []runMode) []string {
-	labels := make([]string, 0, len(modes))
-	for _, mode := range modes {
-		labels = append(labels, mode.Label)
-	}
-	return labels
+	return application.RunModeLabels(modes)
 }
 
 func formatRunModes(modes []runMode) string {
@@ -2810,46 +2720,19 @@ func formatRunModes(modes []runMode) string {
 }
 
 func plannedTestCount(counts ...int) int64 {
-	total := int64(1)
-	for _, count := range counts {
-		if count <= 0 {
-			return 0
-		}
-		if int64(count) > math.MaxInt64/total {
-			return math.MaxInt64
-		}
-		total *= int64(count)
-	}
-	return total
+	return application.PlannedTestCount(counts...)
 }
 
 func runModesIncludeAction(modes []runMode, action string) bool {
-	for _, mode := range modes {
-		if modeIncludesAction(mode, action) {
-			return true
-		}
-	}
-	return false
+	return application.RunModesIncludeAction(modes, action)
 }
 
 func combinationsRequireRipReadback(combos []combinations.Combination) bool {
-	for _, combo := range combos {
-		for key := range combo {
-			if requiresRipReadback(key) {
-				return true
-			}
-		}
-	}
-	return false
+	return application.CombinationsRequireRIPReadback(combos)
 }
 
 func copiesOption(model capabilities.Model) (capabilities.Option, bool) {
-	for _, id := range []string{"EFCopies", "num copies"} {
-		if option, ok := model.OptionByID(id); ok {
-			return option, true
-		}
-	}
-	return capabilities.Option{}, false
+	return application.CopiesOption(model)
 }
 
 func (w *Window) logSelectedCombinations(combos []combinations.Combination, axes []combinations.Axis) {
@@ -2877,50 +2760,6 @@ func (w *Window) logSelectedCombinations(combos []combinations.Combination, axes
 	}
 	w.addLog("Selected %d combination(s) for strategy=%s; axes: %s", len(combos), w.strategy, strings.Join(selected, "; "))
 }
-func defaultPermutationAxes(model capabilities.Model) []combinations.Axis {
-	preferred := []string{"EFResolution", "EFColorMode", "EFMediaType", "EFPrintSpeed", "PageSize", "EFBrightness", "EFPrintCover", "EFOutputBin"}
-	axes := make([]combinations.Axis, 0, len(preferred))
-	seen := map[string]struct{}{}
-	for _, id := range preferred {
-		if opt, ok := model.OptionByID(id); ok {
-			vals := optionValues(opt)
-			if len(vals) > 1 {
-				axes = append(axes, combinations.Axis{Name: opt.ID, Values: vals})
-				seen[opt.ID] = struct{}{}
-			}
-		}
-	}
-	if len(axes) > 0 {
-		return axes
-	}
-	for _, opt := range model.Options {
-		if isCopiesOption(opt.ID) {
-			continue
-		}
-		if _, ok := seen[opt.ID]; ok {
-			continue
-		}
-		vals := checkboxOptionValues(opt)
-		if len(vals) > 1 && len(vals) <= 12 && isLikelyJobAttribute(opt) {
-			axes = append(axes, combinations.Axis{Name: opt.ID, Values: vals})
-		}
-		if len(axes) >= 8 {
-			break
-		}
-	}
-	return axes
-}
-
-func isLikelyJobAttribute(opt capabilities.Option) bool {
-	for _, scope := range opt.Scopes {
-		s := strings.ToLower(scope)
-		if s == "command" || s == "ps" || s == "appe" || s == "uimenu" || strings.HasPrefix(s, "fp") {
-			return true
-		}
-	}
-	return false
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -2962,30 +2801,15 @@ func minInt(a, b int) int {
 }
 
 func effectiveWorkerCount(requested int, plannedTests int64) int {
-	if requested < 1 {
-		requested = 1
-	}
-	requested = min(requested, maxWorkerCount)
-	if plannedTests > 0 && plannedTests < int64(requested) {
-		return int(plannedTests)
-	}
-	return requested
+	return application.EffectiveWorkerCount(requested, plannedTests)
 }
 
 func parseWorkerCount(value string) int {
-	workers, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil || workers < 1 {
-		return 1
-	}
-	return min(workers, maxWorkerCount)
+	return application.ParseWorkerCount(value)
 }
 
 func parseCaseLimit(value string) int {
-	limit, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil || limit < 1 {
-		return defaultCaseLimit
-	}
-	return min(limit, maxCaseLimit)
+	return application.ParseCaseLimit(value)
 }
 
 func selectedValues(m map[string]*widget.Bool) []string {
@@ -2998,63 +2822,27 @@ func selectedValues(m map[string]*widget.Bool) []string {
 	return vals
 }
 func combinationForConstraintValidation(combination combinations.Combination) map[string]string {
-	return combinationToAttributes(combination)
+	return application.CombinationForConstraintValidation(combination)
 }
 
 func combinationToAttributes(combination combinations.Combination) map[string]string {
-	attributes := cloneStringMap(combination)
-	if custom, ok := attributes[pageRangeOptionID]; ok && strings.HasPrefix(custom, pageRangeInternalPrefix) {
-		attributes[pageRangeOptionID] = strings.TrimPrefix(custom, pageRangeInternalPrefix)
-	}
-	// CWS/Postman evidence shows custom ranges are represented directly by
-	// EFPageRange while DPP_PAGE_RANGE remains empty. Never emit the legacy
-	// companion, even if stale data reaches combination generation.
-	delete(attributes, pageRangeLegacyDataID)
-	return attributes
-}
-
-func normalizeOutputProfileValue(value string) string {
-	// U+FEFF is part of Fiery's advertised EFOutProfile wire identity, but is
-	// not a visible part of the profile name. Ignore it only for presentation
-	// and readback comparison; combinationToAttributes must preserve it.
-	return strings.TrimSpace(strings.Trim(strings.TrimSpace(value), "\ufeff"))
+	return application.CombinationToAttributes(combination)
 }
 
 func displayOptionValue(optionID, value string) string {
-	if strings.EqualFold(strings.TrimSpace(optionID), outputProfileOptionID) {
-		return normalizeOutputProfileValue(value)
-	}
-	return value
+	return application.DisplayOptionValue(optionID, value)
 }
 
 func optionValueMatches(optionID, left, right string) bool {
-	if strings.EqualFold(strings.TrimSpace(optionID), outputProfileOptionID) {
-		left = normalizeOutputProfileValue(left)
-		right = normalizeOutputProfileValue(right)
-	}
-	return strings.EqualFold(strings.TrimSpace(left), strings.TrimSpace(right))
+	return application.OptionValueMatches(optionID, left, right)
 }
 
 func cloneStringMap[M ~map[string]string](source M) map[string]string {
-	if len(source) == 0 {
-		return nil
-	}
-	clone := make(map[string]string, len(source))
-	for key, value := range source {
-		clone[key] = value
-	}
-	return clone
+	return application.CloneStringMap(source)
 }
 
 func selectedReadbackValues(got, selected map[string]string) map[string]string {
-	if len(selected) == 0 {
-		return nil
-	}
-	values := make(map[string]string, len(selected))
-	for key := range selected {
-		values[key] = got[key]
-	}
-	return values
+	return application.SelectedReadbackValues(got, selected)
 }
 
 func jobNameFromAttributes(attributes map[string]string, fallbackName string) string {
@@ -3075,20 +2863,12 @@ func ensureBools(store map[string]map[string]*widget.Bool, id string, vals []str
 		}
 	}
 }
-func optionValues(opt capabilities.Option) []string {
-	if len(opt.Values) > 0 {
-		return opt.Values
-	}
-	if opt.Value != "" {
-		return []string{opt.Value}
-	}
-	return nil
+func optionValues(option capabilities.Option) []string {
+	return application.OptionValues(option)
 }
 
-func checkboxOptionValues(opt capabilities.Option) []string {
-	// Every advertised enum remains an independent exact value. Custom text is
-	// a separate direct EFPageRange expression and never replaces Range1.
-	return optionValues(opt)
+func checkboxOptionValues(option capabilities.Option) []string {
+	return application.CheckboxOptionValues(option)
 }
 
 func (w *Window) finishRun(status string) error {

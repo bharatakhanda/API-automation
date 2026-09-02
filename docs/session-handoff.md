@@ -20,6 +20,7 @@ Updated: 2026-09-02
 - `gio-stable-20260902` marks the validated rollback point before platform-neutral core extraction.
 - Latest implementation work fixes custom-range planning so non-empty text cannot silently send bare `Range1`, and combines `/status` with captured plus bounded recent-job workload evidence so externally started jobs show Busy.
 - Wails migration architecture, invariants, stage gates, beta risk, and rollback policy are recorded in `docs/wails3-migration-plan.md`.
+- Stage 1 extraction is complete: platform-neutral planning, attribute semantics, run-mode metadata, and resource limits now live under `internal/application`; Gio remains the production adapter and fallback.
 - Implementation commits:
   - `1d4044a feat: add categorized constraint-aware capability metadata`
   - `c6f2a3e feat: add secure local settings preset store`
@@ -33,6 +34,13 @@ Updated: 2026-09-02
 - The complete stable history and baseline tag are pushed to `origin`.
 
 ## Current implementation
+
+### Platform-neutral planning core
+
+- `internal/application.PlanRequest` snapshots capability metadata and frontend selections without widget or OS dependencies; returned plans own their axes/maps and do not mutate request inputs.
+- The shared planner preserves selected/default/advertised/baseline value-source behavior, preferred fallback axes, numeric/Copies expansion, bounded randomization, custom page-range replacement, published-constraint filtering, and Max-cases limits.
+- Exact `EFPageRange`, legacy-companion exclusion, `EFOutProfile` wire/display comparison, omitted-default readback, selected readback materialization, expected constraint-rejection classification, run modes, lifecycle policies, RIP-readback requirements, and worker/case limits are shared backend semantics.
+- `internal/appgio` converts Gio widget state to the application DTO and retains adapter tests; Linux-runnable application characterization tests cover the extracted behavior. No business logic was introduced in TypeScript.
 
 ### Workspace UX
 
@@ -95,7 +103,7 @@ Updated: 2026-09-02
 
 ## Validation
 
-The following passed after the workspace, constraint-intent, and press-applicability filtering implementation:
+The following passed again after the Stage 1 platform-neutral planning extraction:
 
 - `gofmt -w internal`
 - `go test ./...`
@@ -105,12 +113,18 @@ The following passed after the workspace, constraint-intent, and press-applicabi
 - `go mod verify`
 - `go mod tidy -diff`
 - `govulncheck ./...` — no called vulnerabilities
+- Darwin ARM64 build of all platform-neutral `internal` packages
+- No `os/exec`, `exec.Command`, or `curl` execution references in `internal/appgio` or `internal/fiery`
 - Secret-injected Windows GUI build with `-trimpath -s -w -H=windowsgui`
 - PE subsystem verification: Windows GUI (`Subsystem 2`)
 - Embedded-secret byte verification without printing the key
 - GUI startup smoke test, no `cmd`/`curl`/PowerShell child process, graceful `WM_CLOSE`, exit code 0
 
-Built executable at stable baseline (Windows GUI subsystem 2, 17,210,368 bytes) SHA-256:
+Stage 1 secret-injected GUI checkpoint (Windows GUI subsystem 2, 17,223,680 bytes; UTC build timestamp `2026-09-02T05:19:33.0133340Z`) SHA-256:
+
+`2D57547E850F4CA5F62C0FF3DAECB3D3F5CBCF74CD7D874C7CD189C6A9A0607E`
+
+Stable rollback executable SHA-256 remains:
 
 `C4A16DDC2B74DC1C3F88CB702590B20EE05F45ED505E28BDADB07BC27A78A1D4`
 
@@ -128,6 +142,7 @@ Built executable at stable baseline (Windows GUI subsystem 2, 17,210,368 bytes) 
 - Wails 3 is currently available as beta through `v3.0.0-beta.16`, not a GA release. It will be pinned exactly and introduced only after backend extraction.
 - `refactor/platform-neutral-core` is the active implementation branch. Gio remains the production shell and must pass every extraction gate.
 - The target is a platform-neutral `internal/application` layer, followed by a separate `feature/wails3-ui` branch and side-by-side Windows parity before macOS packaging.
+- Stage 1 is complete and validated. Stage 2 is next: extract the execution runner and typed progress/result/terminal events while Gio continues to consume the shared backend.
 - Full sequencing and verification requirements are in `docs/wails3-migration-plan.md`.
 
 ## Recommended live validation

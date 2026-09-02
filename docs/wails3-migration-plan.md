@@ -152,6 +152,8 @@ Deliverables:
 
 Exit gate: all existing counts and wire semantics unchanged; Windows GUI audit and smoke test pass; Darwin compilation passes for the new package.
 
+Status (2026-09-02): complete on `refactor/platform-neutral-core`. `internal/application` now owns immutable planning snapshots, value-source and range interpretation, bounded constraint-aware generation, Fiery wire serialization/readback semantics, run-mode metadata, and planning limits. Gio snapshots widgets into `application.PlanRequest` and delegates to the shared package. Platform-neutral characterization tests and retained Gio adapter tests pass, as do the full audit, Darwin ARM64 compilation, secret-safe GUI build, and GUI smoke test.
+
 ### Stage 2 — Extract execution runner and typed events
 
 Deliverables:
