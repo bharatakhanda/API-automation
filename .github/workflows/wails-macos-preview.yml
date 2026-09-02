@@ -19,6 +19,9 @@ on:
       - "internal/presets/**"
       - "internal/rangevalues/**"
       - "internal/reportxlsx/**"
+      - "build/wails-macos/**"
+      - "tools/build-wails-macos.sh"
+      - "tools/package-wails-macos.sh"
       - "go.mod"
       - "go.sum"
 
@@ -120,7 +123,7 @@ jobs:
       - name: Build universal application bundle
         shell: bash
         run: |
-          tools/package-wails-macos.sh 0.1.0 "$GITHUB_RUN_NUMBER"
+          bash tools/package-wails-macos.sh 0.1.0 "$GITHUB_RUN_NUMBER"
           plutil -lint "dist/API Automation Preview.app/Contents/Info.plist"
           test "$(lipo -archs 'dist/API Automation Preview.app/Contents/MacOS/api-automation-wails-preview')" = "x86_64 arm64" || \
             test "$(lipo -archs 'dist/API Automation Preview.app/Contents/MacOS/api-automation-wails-preview')" = "arm64 x86_64"
