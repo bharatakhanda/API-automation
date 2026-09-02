@@ -7,9 +7,13 @@ API Automation should feel like a modern enterprise operations tool, not a toy r
 1. **Clear prerequisites without wizard chrome**: keep the connection gate, but use direct navigation rather than numbered steps or previous/next controls.
 2. **Enterprise density**: use compact, structured controls suitable for long-running professional work.
 3. **Progressive disclosure**: separate connection, assets, properties, planning, evidence, logs, and destructive operations.
-4. **Non-blocking execution**: keep network calls and automation off the Gio event thread.
+4. **Non-blocking execution**: keep network calls and automation out of frontend event handlers.
 5. **Operational clarity**: keep health, progress, verdicts, and errors visible without exposing credentials.
-6. **Consistency over decoration**: prefer stable Gio controls, predictable labels, and native confirmations over fragile custom painting.
+6. **Consistency over decoration**: prefer stable controls, predictable labels, and native confirmations over fragile custom painting.
+
+### Wails visual system
+
+The application uses a quiet desktop canvas, one compact navigation rail, restrained 12px cards, subtle borders, a single solid-blue primary action, standard white secondary buttons, and red only for destructive operations. Inputs use a consistent 40px height; ordinary actions use a compact 36px height and content width. File/folder Browse actions are explicitly fixed to field height and must never stretch to fill a row or card. Action groups wrap instead of enlarging controls, keyboard focus remains visible, disabled and hidden states remain unambiguous, and responsive layouts collapse content columns without changing workflow semantics. Decoration must not compete with server health, run progress, evidence, or safety confirmations.
 
 ## Implemented information architecture
 

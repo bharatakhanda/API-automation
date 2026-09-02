@@ -8,7 +8,7 @@ import (
 )
 
 // RunMode is platform-neutral lifecycle metadata. ID is stable for frontend
-// state while Label retains the existing Gio/preset display contract.
+// state while Label retains the existing persisted-preset display contract.
 type RunMode struct {
 	ID          string
 	Label       string

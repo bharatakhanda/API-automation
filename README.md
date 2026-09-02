@@ -1,6 +1,6 @@
 # API Automation
 
-Windows desktop automation for Fiery job import, lifecycle execution, attribute updates, and readback verification. The GUI is written in Go with Gio; native Windows dialogs use Windigo.
+Wails 3 desktop automation for Fiery job import, lifecycle execution, attribute updates, and readback verification. Connection, discovery, planning, execution, results, and guarded administration are backed by the authoritative Go application core; the frontend renders generated service DTOs and does not implement Fiery protocol semantics.
 
 ## Capabilities
 
@@ -38,22 +38,31 @@ go test ./...
 go test -race ./...
 go vet -all ./...
 staticcheck ./...
-go build -trimpath -ldflags "-s -w -H=windowsgui" -o bin/api-automation.exe ./cmd/api-automation
+
+# Requires the exactly pinned Wails CLI and ignored .local/secrets.json
+.\tools\build-windows.ps1
+.\.local\gui-smoke-test.ps1 -ExePath '.\bin\api-automation.exe'
 ```
+
+The Wails runtime and CLI are pinned to `v3.0.0-beta.16`; verify/install the CLI with `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16`. On Windows, `logs/` and `captures/` are created beside `api-automation.exe` for portable debugging. Presets and disk-backed results retain the accepted Wails application-data identity so promotion does not discard existing operator data. Native universal macOS build, signing, notarization, and acceptance are documented in `docs/wails3-macos-release.md`.
+
+For repeat-run regression checks, compare complete baseline/candidate JSONL stores with `go run ./cmd/compare-automation-results -baseline <baseline.jsonl> -candidate <candidate.jsonl>`.
 
 `internal/fiery.DefaultSecretKey` is empty in source. If a field build needs a default key, inject it with `-ldflags -X` from ignored local secret storage. Never commit credentials, `.local/`, `DATA/`, generated captures, logs, or executables.
 
 ## Project layout
 
 ```text
-cmd/api-automation             GUI entrypoint
+cmd/api-automation             Wails 3 desktop entrypoint and locked frontend
 cmd/fiery-readback-probe       Standalone diagnostic probe
-internal/appgio                Gio desktop UI and execution adapter
+cmd/compare-automation-results Semantic baseline/candidate JSONL comparison tool
+internal/appwails              Credential-safe Wails service/DTO adapter
 internal/application           Platform-neutral planning, runner, state, lifecycle, safeguards, and events
 internal/fiery                 Fiery HTTP client and capability discovery
 internal/capabilities          Capability normalization and taxonomy
 internal/combinations          Bounded Cartesian, pairwise, and random generation
 internal/files                 Supported test-file selection
 internal/preflight             Environment checks and snapshots
-tools                          Diagnostic launch scripts
+internal/resultcompare         Order-independent field-result comparison
+tools                          Build, package, and diagnostic scripts
 ```

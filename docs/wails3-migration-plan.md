@@ -2,9 +2,11 @@
 
 Updated: 2026-09-02
 
+> Historical implementation plan. Source adoption is complete: Wails is the sole active desktop shell, while the rollback tags below preserve the retired implementation in Git history. Remaining live Fiery and signed/notarized macOS checks are release gates, not reasons to retain duplicate UI source.
+
 ## Decision
 
-Migrate the desktop shell from Gio to Wails 3 without replacing or destabilizing the validated Gio application. The migration is an application-shell rewrite around shared Go services, not a rewrite of Fiery protocol, capability, planning, lifecycle, result, or safety semantics.
+Migrate the desktop shell from Gio to Wails 3 without replacing or destabilizing the validated Gio application during implementation. The migration is an application-shell rewrite around shared Go services, not a rewrite of Fiery protocol, capability, planning, lifecycle, result, or safety semantics.
 
 The validated rollback point is:
 
@@ -15,7 +17,7 @@ The validated rollback point is:
 - Core-extraction branch: `refactor/platform-neutral-core`
 - Planned UI branch after extraction: `feature/wails3-ui`
 
-The Gio executable remains the production fallback until Wails reaches verified Windows parity. Wails must initially build to a distinct executable and must not overwrite the Gio binary or mutate its configuration in an incompatible format.
+During implementation, the Gio executable remained the production fallback and Wails used a distinct identity. After explicit operator acceptance, Wails was promoted to the canonical command/executable and the prior source was retired behind preserved tags.
 
 ## Framework status and toolchain
 
@@ -27,7 +29,7 @@ Consequences:
 2. The Wails shell will pin an exact beta version rather than tracking latest.
 3. Wails upgrades require a dedicated commit, changelog review, full parity suite, packaging checks, and a rollback test.
 4. A Wails beta is never promoted over the Gio production fallback solely because it builds.
-5. React with TypeScript is the initial frontend choice; dependencies beyond the Wails/Vite template must be justified by a concrete screen requirement and reviewed for license and maintenance risk.
+5. The final frontend is dependency-light HTML/CSS/JavaScript; added dependencies require a concrete screen requirement plus license and maintenance review.
 
 ## Non-negotiable behavior
 
@@ -207,6 +209,8 @@ Deliverables:
 
 Exit gate: preview launches and exits cleanly on Windows; no mutation workflows are enabled yet.
 
+Status (2026-09-02): complete on `feature/wails3-ui`. Both the Go module and installed generation CLI are pinned to `v3.0.0-beta.16`. `cmd/api-automation-wails` embeds a dependency-free, lockfile-controlled frontend under a distinct application/window identity and builds only as `bin/api-automation-wails-preview.exe`. `internal/appwails` exposes credential-safe connection snapshots, exact-draft test/apply, manual Overview refresh, and normalized read-only capability DTOs; no automation, job, preset mutation, file, result, or administration method is bound. Generated name-based bindings use the bundled Wails runtime and reproduce byte-for-byte. The production-tag Windows preview passed PE subsystem/embedded-secret/frontend-secret checks, visual startup inspection, no-shell-child smoke, and graceful `WM_CLOSE`; Gio remains unchanged and production-authoritative.
+
 ### Stage 6 — Wails Windows parity
 
 Order:
@@ -221,6 +225,8 @@ Order:
 
 Exit gate: automated parity matrix and controlled live tests match Gio; both executables install/run side by side.
 
+Status (2026-09-02): implementation and automated Windows gates are complete on `feature/wails3-ui`; controlled live Fiery parity remains pending the operator environment. Native file/folder/save dialogs feed shared selection rules. Capability search/category filtering, exact-value selection, numeric/Copies/custom-range inputs, safe local/server presets, and constraint evidence feed `application.BuildPlan`. The preview consumes backend run-mode/limit/monitor metadata, starts `application.Runner`, streams typed Wails events, cancels operations, keeps bounded live results/logs while preserving complete JSONL records, exports Excel, uses a distinct versioned application-data directory for presets/results, and writes Windows debug logs/captures beside the preview executable. Manual cancel/delete and restart/reboot/inspect/clear operations delegate shared guards and require native confirmations. Exact wire semantics remain Go-only. Full Go/race/static/security/frontend checks pass; Gio and Wails production-tag executables run simultaneously without shell children and close gracefully. Live checklist rows in `docs/wails3-regression-checklist.md` must still be executed before the Stage 6 exit gate is declared fully satisfied.
+
 ### Stage 7 — macOS enablement
 
 Deliverables:
@@ -234,12 +240,16 @@ Deliverables:
 
 Exit gate: signed/notarized field candidate passes the same backend parity suite and Mac-specific smoke tests.
 
+Status (2026-09-02): native compilation and unsigned packaging were first automated by `.github/workflows/wails-macos-preview.yml` and now run from `.github/workflows/wails-macos.yml` with the canonical product identity. GitHub Actions run `33606364288` passed backend/frontend/binding gates and produced native arm64 (`f8298bafc84549906fc17d89830cae474f2faedb1559724d8acfeaea42ecbe21`) and x86_64 (`ed8c887971d0214249b7837b74d0b720d92e5293eb75e75b1585568a970efb7e`) Mach-O artifacts plus a universal unsigned app ZIP (`4ab6bc8b0e127f511db74a486400a03f4fddf5894f3b0bfcd7b6c629f6708238`). `tools/package-wails-macos.sh` creates the universal `.app`/ZIP and supports hardened-runtime Developer ID signing plus `notarytool` submission/stapling. Architecture, bundle identity, minimum OS, credential/data policy, and interactive gates are fixed in `docs/wails3-macos-release.md`. The signed/notarized artifact and interactive Fiery/UI/wake-sleep/large-export checks remain pending Apple credentials, physical Macs, and the operator environment.
+
 ### Stage 8 — Adoption and Gio retirement decision
 
 - Release Wails as preview/beta beside Gio.
 - Complete multiple field cycles and compare diagnostics/results.
 - Keep rollback artifacts and configuration migration reversible.
 - Retire Gio only after explicit acceptance; removal is a separate logical commit and release decision.
+
+Status (2026-09-02): **complete by explicit operator decision**. The accepted checkpoint is tagged `wails-preview-accepted-20260902`; the legacy command, adapter, Gio/Windigo dependencies, and fallback branding were removed in a separate logical change. Wails now owns `cmd/api-automation` and `bin/api-automation.exe`. `docs/wails3-adoption-record.md` records the decision and rollback points. Result comparison remains available as a generic baseline/candidate tool. Live destructive checks and signed/notarized physical-Mac acceptance remain release-specific gates.
 
 ## Verification matrix
 
@@ -254,7 +264,7 @@ Every backend-extraction commit must run:
 - `go mod tidy -diff`
 - `govulncheck ./...`
 - Darwin compile of all platform-neutral packages
-- Secret-safe Gio build, PE subsystem check, embedded-key presence check without printing it, no shell/curl children, and graceful `WM_CLOSE`
+- Secret-safe Wails build, PE subsystem check, embedded-key presence check without printing it, no shell/curl children, and graceful `WM_CLOSE`
 
 Additional parity fixtures must lock:
 
@@ -271,9 +281,8 @@ Additional parity fixtures must lock:
 
 ## Configuration and data compatibility
 
-- Gio remains owner of the existing configuration until Wails compatibility is proven.
-- Wails preview initially uses a separate application identifier and data directory.
-- Import from Gio settings is copy-based and versioned; never destructively migrate the only copy.
+- The accepted Wails application-data identity remains in use so promotion does not discard presets or results.
+- Any future data-directory rename or import is copy-based, versioned, validated, and non-destructive.
 - Preset and result readers should be backward compatible. Writers add schema versions before changing shape.
 - Logs and captures identify frontend, application version, platform, and operation ID without credentials.
 
@@ -284,7 +293,7 @@ When a defect is found:
 1. Add the smallest regression test that reproduces it.
 2. Fix it in the lowest authoritative shared package, not independently in both frontends.
 3. Commit the fix separately from unrelated migration work.
-4. If the defect affects the stable Gio release, land/cherry-pick it to `main`, rebuild and validate Gio, then merge it back into migration branches.
+4. Fix active defects in the shared core or Wails adapter and preserve rollback tags unchanged.
 5. Push the logical commit and report impact, verification, remaining work, and next stage.
 
 Known evidence gap: the latest capability audit proves 78 displayed / 187 excluded / zero removed / 24 constrained and excludes the eight known backend leaks, but the operator has not yet identified the remaining controls that visually disagree with CWS. Do not guess or add model-specific blacklists; keep exact diagnostics and resolve IDs from field evidence.
@@ -300,4 +309,4 @@ At the end of each stage:
 - List defects found and their disposition.
 - State the next stage and its first task.
 
-No Wails preview becomes the production binary without an explicit parity gate, even though implementation commits and pushes are pre-authorized for this migration.
+The explicit acceptance decision is recorded in `docs/wails3-adoption-record.md`; Wails is now the production source and binary identity.

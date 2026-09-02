@@ -1,8 +1,8 @@
-# Gio-to-Wails regression checklist
+# Wails desktop regression checklist
 
 Updated: 2026-09-02
 
-This is the parity gate for the validated Gio fallback and each Wails preview build. Never run destructive checks against a production Fiery. Record server/model, application commit, executable hash, tester, and evidence paths outside the repository.
+Use this checklist for Wails desktop releases and controlled Fiery validation. Never run destructive checks against a production Fiery. Record server/model, application commit, executable hash, tester, and evidence paths outside the repository.
 
 ## Automated core and desktop checks
 
@@ -12,13 +12,18 @@ This is the parity gate for the validated Gio fallback and each Wails preview bu
 - [x] Dependency integrity: `go mod verify` and `go mod tidy -diff`
 - [x] Called-vulnerability scan: `govulncheck ./...`
 - [x] Darwin ARM64 compilation of platform-neutral internal packages
-- [x] No `os/exec`, `exec.Command`, or `curl` execution reference in `internal/appgio` or `internal/fiery`
+- [x] No `os/exec`, `exec.Command`, or `curl` execution reference in the desktop application or `internal/fiery`
 - [x] Secret-injected Windows GUI build, PE subsystem 2, and embedded-secret byte verification
 - [x] Windows startup/close smoke test with no shell or curl children and graceful `WM_CLOSE`
+- [x] Exact Wails runtime/CLI `v3.0.0-beta.16` pin and byte-reproducible name-based bindings
+- [x] Frontend lockfile/audit, JavaScript syntax, no source maps, and no configured-secret bytes in assets
+- [x] Canonical production-tag Wails build, visual startup inspection, and graceful no-shell-child close
+- [x] Backend-owned file resolution, exact custom-range planning, preset reconciliation, run-mode rejection, typed event/state cloning, credential redaction, administration interlocks, and generated connection-DTO field contract tests
+- [x] Legacy shell removed from active source after an explicit accepted-Wails checkpoint and rollback tag
 
-## Live Fiery parity checks
+## Live Fiery acceptance checks
 
-These checks require the operator's target server, credentials, approved files, and an isolated environment. They remain pending for the extracted-core checkpoint and must be run against both shells during Wails parity testing.
+These checks require the operator's target server, credentials, approved files, and an isolated environment. Repeat them for release candidates and compare evidence against an accepted baseline.
 
 ### Connection and discovery
 
@@ -50,9 +55,18 @@ These checks require the operator's target server, credentials, approved files, 
 - [ ] Inspect job inventory and confirm expiry/server changes invalidate it.
 - [ ] With disposable jobs and explicit destructive-operation approval only, enter exact `CLEAR ALL JOBS`, verify count revalidation, and confirm empty inventory.
 
+## macOS gate
+
+- [x] Build the Wails shell natively on Apple Silicon and Intel macOS runners; do not treat a Windows cross-build as a release gate.
+- [x] Compile the platform-neutral packages for Darwin ARM64 from Windows as an additional portability check.
+- [x] Choose universal `arm64` + `x86_64` packaging with the canonical application identity and declared macOS 13 minimum.
+- [ ] Validate Application Support paths, in-memory-only credential handling, Fiery TLS, file/folder permissions, cancellation, wake/sleep, and large exports on physical Macs.
+- [ ] Sign with hardened runtime, notarize, install on a clean supported macOS account, and rerun parity smoke tests.
+
 ## Evidence status
 
-- Extracted Gio core automated gate: **PASS**
-- Extracted Gio desktop startup/close smoke: **PASS**
-- Extracted Gio live Fiery checklist: **PENDING operator environment**
-- Wails side-by-side checklist: **PENDING Wails preview**
+- Historical extracted-core and desktop rollback checkpoints: **PRESERVED BY TAG**
+- Wails Windows implementation/automated desktop gate: **PASS**
+- Wails source adoption and canonical application promotion: **APPROVED**
+- Wails live connection/capability/mutation release checklist: **PENDING OPERATOR ENVIRONMENT**
+- Signed/notarized physical-Mac release gate: **PENDING APPLE CREDENTIALS AND HARDWARE**
