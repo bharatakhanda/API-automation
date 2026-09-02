@@ -4,13 +4,12 @@ package appgio
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"image/color"
 	"strings"
 	"time"
 
+	"api-automation/internal/application"
 	"api-automation/internal/capabilities"
 	"api-automation/internal/combinations"
 	"api-automation/internal/fiery"
@@ -24,43 +23,25 @@ import (
 	"gioui.org/widget/material"
 )
 
-func connectionKey(server model.ServerConnection) string {
-	digest := sha256.Sum256([]byte(strings.TrimSpace(server.IPAddress) + "\x00" + strings.TrimSpace(server.SecretKey) + "\x00" + strings.TrimSpace(server.Password)))
-	return hex.EncodeToString(digest[:])
+func (w *Window) connectionBackend() *application.ConnectionState {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.connectionState == nil {
+		w.connectionState = application.NewConnectionState(fiery.DefaultSecretKey)
+	}
+	return w.connectionState
 }
 
 func (w *Window) draftConnectionUnchecked() model.ServerConnection {
-	draft := model.ServerConnection{
+	return w.connectionBackend().ResolveDraft(model.ServerConnection{
 		IPAddress: strings.TrimSpace(w.serverIP.Text()),
 		SecretKey: strings.TrimSpace(w.secretKey.Text()),
 		Password:  strings.TrimSpace(w.password.Text()),
-	}
-	w.mu.Lock()
-	active, hasActive, configuredSecret := w.activeServer, w.hasActiveServer, w.configuredSecret
-	w.mu.Unlock()
-	if draft.SecretKey == "" {
-		if hasActive {
-			draft.SecretKey = active.SecretKey
-		} else {
-			draft.SecretKey = configuredSecret
-		}
-	}
-	if draft.Password == "" && hasActive {
-		draft.Password = active.Password
-	}
-	return draft
+	})
 }
 
 func (w *Window) invalidateChangedConnectionTest() {
-	draft := w.draftConnectionUnchecked()
-	key := connectionKey(draft)
-	w.mu.Lock()
-	if w.serverTestOK && key != w.testedConnectionKey {
-		w.serverTestOK = false
-		w.testedConnectionKey = ""
-		w.serverTestStatus = "Details changed · test again"
-	}
-	w.mu.Unlock()
+	w.connectionBackend().InvalidateIfChanged(w.draftConnectionUnchecked())
 }
 
 func (w *Window) applyTestedConnection() {
@@ -72,26 +53,15 @@ func (w *Window) applyTestedConnection() {
 	if !ok {
 		return
 	}
-	key := connectionKey(draft)
-	w.mu.Lock()
-	tested := w.serverTestOK && w.testedConnectionKey == key
-	old := w.activeServer
-	hadActive := w.hasActiveServer
-	w.mu.Unlock()
-	if !tested {
-		w.setStatus("Test these exact connection details successfully before pressing OK.")
+	_, changed, err := w.connectionBackend().Apply(draft)
+	if err != nil {
+		w.setStatus(capitalizeStatus(err.Error()) + ".")
 		return
 	}
-	changed := !hadActive || connectionKey(old) != key
 	if changed {
 		w.invalidateServerDependentState()
 	}
 	w.mu.Lock()
-	w.activeServer = draft
-	w.hasActiveServer = true
-	w.serverTestOK = false
-	w.testedConnectionKey = ""
-	w.serverTestStatus = "Active connection · test replacements before applying"
 	w.healthStatus = "Checking"
 	w.healthDetail = "Waiting for the first lightweight status check."
 	w.mu.Unlock()
@@ -105,27 +75,17 @@ func (w *Window) applyTestedConnection() {
 }
 
 func (w *Window) beginConnectionChange() {
-	if server, ok := w.server(); ok {
+	if server, ok := w.connectionBackend().BeginChange(); ok {
 		w.serverIP.SetText(server.IPAddress)
 		w.secretKey.SetText("")
 		w.password.SetText("")
 	}
-	w.mu.Lock()
-	w.serverTestOK = false
-	w.testedConnectionKey = ""
-	w.serverTestStatus = "Not tested"
-	w.mu.Unlock()
 	w.setActivePage(pageConnection)
 	w.setStatus("Current connection remains active until replacement details pass testing and you press OK.")
 }
 
 func (w *Window) cancelConnectionChange() {
-	w.mu.Lock()
-	server, ok := w.activeServer, w.hasActiveServer
-	w.serverTestOK = false
-	w.testedConnectionKey = ""
-	w.serverTestStatus = "Not tested"
-	w.mu.Unlock()
+	server, ok := w.connectionBackend().CancelChange()
 	if !ok {
 		return
 	}
@@ -140,10 +100,13 @@ func (w *Window) invalidateServerDependentState() {
 	w.stopOverviewHealthMonitor()
 	w.mu.Lock()
 	w.capabilities = capabilities.Model{}
-	w.capabilityGeneration++
-	w.adminInventoryServer = ""
-	w.adminInventoryAt = time.Time{}
-	w.adminJobCount = 0
+	if w.capabilityGuard == nil {
+		w.capabilityGuard = new(application.GenerationGuard)
+	}
+	w.capabilityGuard.Next()
+	if w.adminState != nil {
+		w.adminState.InvalidateInventory()
+	}
 	w.healthStatus = "Not checked"
 	w.healthDetail = ""
 	w.healthCheckedAt = time.Time{}
@@ -167,9 +130,7 @@ func (w *Window) workflowSidebar(gtx layout.Context) layout.Dimensions {
 		if len(w.navButtons) != len(workspacePages) {
 			w.navButtons = make([]widget.Clickable, len(workspacePages))
 		}
-		w.mu.Lock()
-		connected := w.hasActiveServer
-		w.mu.Unlock()
+		connected := w.connectionBackend().Snapshot().HasActive
 		children := []layout.FlexChild{
 			layout.Rigid(label(w.theme, "API Automation", 20, rgb(0xffffff)).Layout),
 			layout.Rigid(spacer(24)),
@@ -269,14 +230,13 @@ func (w *Window) workflowHeader(gtx layout.Context) layout.Dimensions {
 }
 
 func (w *Window) connectionPage(gtx layout.Context) layout.Dimensions {
-	w.mu.Lock()
-	testStatus := w.serverTestStatus
-	testOK := w.serverTestOK
-	hasActive := w.hasActiveServer
-	activeIP := w.activeServer.IPAddress
-	secretConfigured := w.configuredSecret != "" || (hasActive && w.activeServer.SecretKey != "")
-	passwordConfigured := hasActive && w.activeServer.Password != ""
-	w.mu.Unlock()
+	connection := w.connectionBackend().Snapshot()
+	testStatus := connection.TestStatus
+	testOK := connection.TestOK
+	hasActive := connection.HasActive
+	activeIP := connection.ActiveIPAddress
+	secretConfigured := connection.SecretConfigured
+	passwordConfigured := connection.PasswordConfigured
 	secretTitle, secretHint := "Secret / API key replacement", "Required"
 	if secretConfigured {
 		secretTitle, secretHint = "Secret / API key · Configured", "Leave blank to keep the configured key, or enter a replacement"
@@ -323,8 +283,8 @@ func (w *Window) connectionPage(gtx layout.Context) layout.Dimensions {
 
 func (w *Window) overviewPage(gtx layout.Context) layout.Dimensions {
 	automationActive := w.running.Load()
+	server, _ := w.connectionBackend().Active()
 	w.mu.Lock()
-	server := w.activeServer
 	capabilityModel := w.capabilities
 	healthStatus, healthDetail := w.healthStatus, w.healthDetail
 	healthAt, latency := w.healthCheckedAt, w.healthLatency
@@ -465,29 +425,11 @@ func (w *Window) jobAutomationActive() bool {
 }
 
 func effectiveOverviewServerStateWithJobs(apiState, apiDetail string, workload fiery.JobWorkloadSummary) (string, string) {
-	if workload.ActiveJobs < 1 {
-		return apiState, apiDetail
-	}
-	detail := strings.TrimSpace(apiDetail)
-	if detail == "" {
-		detail = "Fiery API status pending"
-	}
-	evidence := strings.Trim(strings.Join([]string{workload.EvidenceStatus, workload.EvidenceState}, "/"), "/")
-	if evidence == "" {
-		evidence = "active job"
-	}
-	return "Busy", fmt.Sprintf("%s · Fiery inventory reports %d active job(s): %s", detail, workload.ActiveJobs, evidence)
+	return application.EffectiveOverviewServerStateWithJobs(apiState, apiDetail, workload)
 }
 
 func effectiveOverviewServerState(apiState, apiDetail string, automationActive bool) (string, string) {
-	if !automationActive {
-		return apiState, apiDetail
-	}
-	detail := strings.TrimSpace(apiDetail)
-	if detail == "" {
-		detail = "Fiery API status pending"
-	}
-	return "Busy", detail + " · application automation active"
+	return application.EffectiveOverviewServerState(apiState, apiDetail, automationActive)
 }
 
 func automationStatus(running bool, status string) string {
@@ -870,17 +812,22 @@ func (w *Window) stopOverviewHealthMonitor() {
 	w.mu.Lock()
 	cancel := w.healthCancel
 	w.healthCancel = nil
-	w.healthGeneration++
+	if w.healthGuard == nil {
+		w.healthGuard = new(application.GenerationGuard)
+	}
+	w.healthGuard.Next()
 	w.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 }
 
-const (
-	overviewStatusPollInterval = time.Second
-	overviewJobPollInterval    = 2 * time.Second
-	overviewJobProbeLimit      = 64
+var overviewMonitorPolicy = application.DefaultOverviewMonitorPolicy()
+
+var (
+	overviewStatusPollInterval = overviewMonitorPolicy.StatusInterval
+	overviewJobPollInterval    = overviewMonitorPolicy.JobInterval
+	overviewJobProbeLimit      = overviewMonitorPolicy.JobProbeLimit
 )
 
 func (w *Window) startOverviewHealthMonitor() {
@@ -890,8 +837,10 @@ func (w *Window) startOverviewHealthMonitor() {
 	}
 	ctx, cancel := context.WithCancel(w.rootContext())
 	w.mu.Lock()
-	w.healthGeneration++
-	generation := w.healthGeneration
+	if w.healthGuard == nil {
+		w.healthGuard = new(application.GenerationGuard)
+	}
+	generation := w.healthGuard.Next()
 	w.healthCancel = cancel
 	w.healthStatus = "Checking"
 	w.healthDetail = "Contacting the Fiery status endpoint."
@@ -916,7 +865,10 @@ func (w *Window) monitorServerHealth(ctx context.Context, generation uint64, ser
 	nextJobProbe := time.Now()
 	for {
 		w.mu.Lock()
-		capabilityGeneration := w.capabilityGeneration
+		if w.capabilityGuard == nil {
+			w.capabilityGuard = new(application.GenerationGuard)
+		}
+		capabilityGeneration := w.capabilityGuard.Current()
 		capabilityModel := w.capabilities
 		w.mu.Unlock()
 		capabilitiesLoaded := len(capabilityModel.Options) > 0
@@ -951,10 +903,7 @@ func (w *Window) monitorServerHealth(ctx context.Context, generation uint64, ser
 					jobWorkload = probe
 				}
 				jobProbeFailures++
-				probeDelay := time.Duration(1<<minInt(jobProbeFailures, 4)) * overviewJobPollInterval
-				if probeDelay > 30*time.Second {
-					probeDelay = 30 * time.Second
-				}
+				probeDelay := application.FailureBackoff(jobProbeFailures, overviewJobPollInterval, overviewMonitorPolicy.MaximumBackoff)
 				nextJobProbe = time.Now().Add(probeDelay)
 				w.diagnostic.printf("OVERVIEW_JOB_POLL: endpoint=/live/api/v5/jobs bounded=true result=error failures=%d next=%s error=%q", jobProbeFailures, probeDelay, short(probeErr.Error(), 220))
 			} else {
@@ -970,10 +919,7 @@ func (w *Window) monitorServerHealth(ctx context.Context, generation uint64, ser
 		if err != nil {
 			session = fiery.Session{}
 			failures++
-			delay = time.Duration(1<<minInt(failures, 4)) * time.Second
-			if delay > 30*time.Second {
-				delay = 30 * time.Second
-			}
+			delay = application.FailureBackoff(failures, overviewStatusPollInterval, overviewMonitorPolicy.MaximumBackoff)
 			w.diagnostic.printf("OVERVIEW_STATUS_POLL: endpoint=/live/api/v5/status result=error failures=%d next=%s latency=%s error=%q", failures, delay, latency.Round(time.Millisecond), short(err.Error(), 220))
 			w.setHealthSnapshot(generation, "Unavailable", short(err.Error(), 220), latency)
 		} else {
@@ -1000,7 +946,7 @@ func (w *Window) monitorServerHealth(ctx context.Context, generation uint64, ser
 
 func (w *Window) setHealthSnapshot(generation uint64, status, detail string, latency time.Duration) {
 	w.mu.Lock()
-	if generation != w.healthGeneration {
+	if w.healthGuard == nil || !w.healthGuard.IsCurrent(generation) {
 		w.mu.Unlock()
 		return
 	}
