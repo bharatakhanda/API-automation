@@ -11,6 +11,7 @@ import (
 
 	"api-automation/internal/capabilities"
 	"api-automation/internal/fiery"
+	"api-automation/internal/preflight"
 )
 
 func TestPreviewStateNeverSerializesCredentials(t *testing.T) {
@@ -41,6 +42,33 @@ func TestPreviewDiagnosticsUseInjectedDataIdentityAndClose(t *testing.T) {
 	}
 	if strings.Contains(string(body), "secret-not-for-log") || !strings.Contains(string(body), "Application exiting") {
 		t.Fatalf("unsafe or incomplete diagnostic: %q", body)
+	}
+}
+
+func TestPreviewDiagnosticsAndCapturesUseInjectedDebugDirectory(t *testing.T) {
+	dataRoot := t.TempDir()
+	debugRoot := t.TempDir()
+	service := NewService("secret-not-for-log", Options{DataDirectory: dataRoot, DebugDirectory: debugRoot})
+	defer Shutdown(service)
+	if got := filepath.Dir(filepath.Dir(service.State().DiagnosticPath)); got != debugRoot {
+		t.Fatalf("diagnostic root = %q, want %q", got, debugRoot)
+	}
+	client, err := fiery.New(fiery.Config{ServerIP: "127.0.0.1", SecretKey: "key", Password: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, warnings := service.saveCapabilityEvidence(client, fiery.CapabilitySnapshot{CapturedAt: time.Now()}, capabilities.Model{}, preflight.EnvironmentSnapshot{})
+	if len(warnings) != 0 || len(paths) != 3 {
+		t.Fatalf("paths=%v warnings=%v", paths, warnings)
+	}
+	captureRoot := filepath.Join(debugRoot, "captures")
+	for _, path := range paths {
+		if filepath.Dir(path) != captureRoot {
+			t.Fatalf("capture path %q is outside %q", path, captureRoot)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dataRoot, "captures")); !os.IsNotExist(err) {
+		t.Fatalf("captures unexpectedly written below data directory: %v", err)
 	}
 }
 

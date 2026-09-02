@@ -45,7 +45,7 @@ go build -trimpath -ldflags "-s -w -H=windowsgui" -o bin/api-automation.exe ./cm
 .\.local\gui-smoke-test.ps1 -ExePath '.\bin\api-automation-wails-preview.exe'
 ```
 
-The Wails runtime and CLI are pinned to `v3.0.0-beta.16`; verify/install the CLI with `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16`. The preview has a distinct name, command, executable, data directory, and frontend lockfile. It now exposes mutation workflows through the shared backend, but remains a preview until the controlled live parity checklist is approved; use Gio as the production fallback. Native universal macOS build, signing, and acceptance gates are documented in `docs/wails3-macos-release.md`.
+The Wails runtime and CLI are pinned to `v3.0.0-beta.16`; verify/install the CLI with `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16`. The preview has a distinct name, command, executable, application-data identity, and frontend lockfile. On Windows, its `logs/` and `captures/` directories are created beside `api-automation-wails-preview.exe` for portable debugging; presets and disk-backed results remain under the separate Wails application-data directory. It now exposes mutation workflows through the shared backend, but remains a preview until the controlled live parity checklist is approved; use Gio as the production fallback. Native universal macOS build, signing, and acceptance gates are documented in `docs/wails3-macos-release.md`.
 
 During controlled adoption cycles, compare complete Gio/Wails JSONL stores with `go run ./cmd/compare-automation-results -gio <gio.jsonl> -wails <wails.jsonl>` and record the cycle using `docs/wails3-field-adoption.md`.
 

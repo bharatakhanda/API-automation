@@ -4,6 +4,10 @@ import (
 	"embed"
 	"io/fs"
 	"log"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sync"
 
 	"api-automation/internal/appwails"
 	"api-automation/internal/fiery"
@@ -22,23 +26,24 @@ func main() {
 	dialogs := new(nativeDialogs)
 	var app *wails.App
 	service := appwails.NewService(fiery.DefaultSecretKey, appwails.Options{
-		Dialogs: dialogs,
+		Dialogs:        dialogs,
+		DebugDirectory: executableDebugDirectory(),
 		EventEmitter: func(name string, data any) {
 			if app != nil {
 				app.Event.Emit(name, data)
 			}
 		},
 	})
+	shutdown := sync.OnceFunc(func() { appwails.Shutdown(service) })
+	defer shutdown()
 	app = wails.New(wails.Options{
 		Name:        "API Automation Preview",
 		Description: "Wails 3 preview for Fiery API Automation",
 		Services: []wails.Service{
 			wails.NewService(service),
 		},
-		Assets: wails.AssetOptions{Handler: wails.BundledAssetFileServer(assets)},
-		OnShutdown: func() {
-			appwails.Shutdown(service)
-		},
+		Assets:     wails.AssetOptions{Handler: wails.BundledAssetFileServer(assets)},
+		OnShutdown: shutdown,
 		Mac: wails.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
@@ -60,4 +65,16 @@ func main() {
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func executableDebugDirectory() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		log.Printf("Wails debug directory unavailable: %v", err)
+		return ""
+	}
+	return filepath.Dir(executable)
 }

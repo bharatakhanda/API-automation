@@ -89,6 +89,7 @@ type Options struct {
 	Dialogs           DialogPort
 	EventEmitter      func(string, any)
 	DataDirectory     string
+	DebugDirectory    string
 	DisableDiagnostic bool
 }
 
@@ -108,12 +109,13 @@ type Service struct {
 	presets      *presets.Store
 	jobWorkload  fiery.JobWorkloadSummary
 
-	runMu          sync.Mutex
-	run            *activeRun
-	eventEmitter   func(string, any)
-	administration *core.AdministrationState
-	diagnostic     *diagnosticLog
-	dataDirectory  string
+	runMu            sync.Mutex
+	run              *activeRun
+	eventEmitter     func(string, any)
+	administration   *core.AdministrationState
+	diagnostic       *diagnosticLog
+	dataDirectory    string
+	captureDirectory string
 }
 
 func NewService(defaultSecret string, options Options) *Service {
@@ -122,14 +124,22 @@ func NewService(defaultSecret string, options Options) *Service {
 	if dataDirectory == "" {
 		dataDirectory, _ = previewDataDirectory()
 	}
+	debugDirectory := strings.TrimSpace(options.DebugDirectory)
+	if debugDirectory == "" {
+		debugDirectory = dataDirectory
+	}
 	diagnostic := &diagnosticLog{}
+	captureDirectory := ""
+	if debugDirectory != "" {
+		captureDirectory = filepath.Join(debugDirectory, "captures")
+	}
 	if !options.DisableDiagnostic {
-		diagnostic = newDiagnosticLog(dataDirectory)
+		diagnostic = newDiagnosticLog(debugDirectory)
 	}
 	service := &Service{
 		connection: core.NewConnectionState(defaultSecret), rootContext: ctx, rootCancel: cancel,
 		administration: new(core.AdministrationState), dialogs: options.Dialogs, eventEmitter: options.EventEmitter,
-		diagnostic: diagnostic, dataDirectory: dataDirectory,
+		diagnostic: diagnostic, dataDirectory: dataDirectory, captureDirectory: captureDirectory,
 	}
 	service.diagnostic.Printf("APPLICATION_START frontend=wails version=%q", previewVersion)
 	return service
@@ -309,10 +319,10 @@ func (service *Service) DiscoverCapabilities(ctx context.Context) (CapabilityVie
 }
 
 func (service *Service) saveCapabilityEvidence(client *fiery.Client, snapshot fiery.CapabilitySnapshot, model capabilities.Model, environment preflight.EnvironmentSnapshot) (paths, warnings []string) {
-	if service.dataDirectory == "" {
+	if service.captureDirectory == "" {
 		return nil, []string{"preview capture directory is unavailable"}
 	}
-	dir := filepath.Join(service.dataDirectory, "captures")
+	dir := service.captureDirectory
 	for label, save := range map[string]func() (string, error){
 		"capability snapshot":  func() (string, error) { return client.SaveCapabilitySnapshot(snapshot, dir) },
 		"environment snapshot": func() (string, error) { return preflight.Save(environment, dir) },
