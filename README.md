@@ -1,6 +1,6 @@
 # API Automation
 
-Desktop automation for Fiery job import, lifecycle execution, attribute updates, and readback verification. The validated production GUI remains Go/Gio with native Windigo dialogs. A separate Wails 3 beta preview now exercises the same authoritative Go backend across connection, discovery, planning, execution, results, and guarded administration.
+Wails 3 desktop automation for Fiery job import, lifecycle execution, attribute updates, and readback verification. Connection, discovery, planning, execution, results, and guarded administration are backed by the authoritative Go application core; the frontend renders generated service DTOs and does not implement Fiery protocol semantics.
 
 ## Capabilities
 
@@ -38,27 +38,24 @@ go test ./...
 go test -race ./...
 go vet -all ./...
 staticcheck ./...
-go build -trimpath -ldflags "-s -w -H=windowsgui" -o bin/api-automation.exe ./cmd/api-automation
 
 # Requires the exactly pinned Wails CLI and ignored .local/secrets.json
-.\tools\build-wails-preview.ps1
-.\.local\gui-smoke-test.ps1 -ExePath '.\bin\api-automation-wails-preview.exe'
+.\tools\build-windows.ps1
+.\.local\gui-smoke-test.ps1 -ExePath '.\bin\api-automation.exe'
 ```
 
-The Wails runtime and CLI are pinned to `v3.0.0-beta.16`; verify/install the CLI with `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16`. The preview has a distinct name, command, executable, application-data identity, and frontend lockfile. On Windows, its `logs/` and `captures/` directories are created beside `api-automation-wails-preview.exe` for portable debugging; presets and disk-backed results remain under the separate Wails application-data directory. It now exposes mutation workflows through the shared backend, but remains a preview until the controlled live parity checklist is approved; use Gio as the production fallback. Native universal macOS build, signing, and acceptance gates are documented in `docs/wails3-macos-release.md`.
+The Wails runtime and CLI are pinned to `v3.0.0-beta.16`; verify/install the CLI with `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16`. On Windows, `logs/` and `captures/` are created beside `api-automation.exe` for portable debugging. Presets and disk-backed results retain the accepted Wails application-data identity so promotion does not discard existing operator data. Native universal macOS build, signing, notarization, and acceptance are documented in `docs/wails3-macos-release.md`.
 
-During controlled adoption cycles, compare complete Gio/Wails JSONL stores with `go run ./cmd/compare-automation-results -gio <gio.jsonl> -wails <wails.jsonl>` and record the cycle using `docs/wails3-field-adoption.md`.
+For repeat-run regression checks, compare complete baseline/candidate JSONL stores with `go run ./cmd/compare-automation-results -baseline <baseline.jsonl> -candidate <candidate.jsonl>`.
 
 `internal/fiery.DefaultSecretKey` is empty in source. If a field build needs a default key, inject it with `-ldflags -X` from ignored local secret storage. Never commit credentials, `.local/`, `DATA/`, generated captures, logs, or executables.
 
 ## Project layout
 
 ```text
-cmd/api-automation             Production Gio entrypoint
-cmd/api-automation-wails       Wails 3 preview entrypoint and locked frontend
+cmd/api-automation             Wails 3 desktop entrypoint and locked frontend
 cmd/fiery-readback-probe       Standalone diagnostic probe
-cmd/compare-automation-results Semantic Gio/Wails JSONL comparison tool
-internal/appgio                Gio desktop UI and execution adapter
+cmd/compare-automation-results Semantic baseline/candidate JSONL comparison tool
 internal/appwails              Credential-safe Wails service/DTO adapter
 internal/application           Platform-neutral planning, runner, state, lifecycle, safeguards, and events
 internal/fiery                 Fiery HTTP client and capability discovery

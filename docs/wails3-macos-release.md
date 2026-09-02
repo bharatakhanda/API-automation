@@ -1,22 +1,22 @@
 # Wails 3 macOS build and release gate
 
-This document defines the native macOS path for the separate **API Automation Preview** application. Gio remains the production fallback until the controlled Fiery checklist and signed/notarized field cycles pass.
+This document defines the native macOS build and release path for **API Automation**. Source adoption is complete; signed/notarized distribution remains gated on Apple credentials and interactive physical-Mac acceptance.
 
 ## Supported package and identity
 
 - Minimum declared OS: macOS 13.0.
 - Release package: one universal application containing `arm64` and `x86_64` slices.
-- Bundle name: `API Automation Preview.app`.
-- Bundle identifier: `com.fiery.api-automation.preview`.
-- Executable: `api-automation-wails-preview`.
-- Runtime/configuration identity: `API Automation Wails Preview`.
+- Bundle name: `API Automation.app`.
+- Bundle identifier: `com.fiery.api-automation`.
+- Executable: `api-automation`.
+- Runtime/configuration identity: `API Automation Wails Preview` (retained to preserve accepted presets/results).
 - Wails runtime and generator: exactly `v3.0.0-beta.16`.
 
-The separate preview identity prevents macOS data from colliding with Gio or a future production Wails identity. Go's `os.UserConfigDir` places preview presets, captures, diagnostics, results, and exports below `~/Library/Application Support/API Automation Wails Preview`. No password, session cookie, or authenticated client is serialized there. Credentials remain in Go memory for the current process only, so this stage does not create a Keychain migration requirement. Any future credential persistence must use Keychain rather than files or frontend storage.
+The retained runtime identity avoids a destructive data move during promotion. Go's `os.UserConfigDir` places presets and results below `~/Library/Application Support/API Automation Wails Preview`; diagnostics and captures use the platform debug-directory policy. No password, session cookie, or authenticated client is serialized there. Credentials remain in Go memory for the current process only. Any future credential persistence must use Keychain rather than files or frontend storage.
 
 ## Continuous native compile gate
 
-`.github/workflows/wails-macos-preview.yml` runs on native Apple Silicon and Intel GitHub runners. It verifies:
+`.github/workflows/wails-macos.yml` runs on native Apple Silicon and Intel GitHub runners. It verifies:
 
 1. The pinned Wails CLI.
 2. Platform-neutral Go tests, race tests, vet, module verification, and tidy state.
@@ -42,8 +42,8 @@ The script disables shell tracing, validates the CLI pin, regenerates bindings, 
 Move the two resulting binaries into one trusted macOS workspace as:
 
 ```text
-dist/api-automation-wails-preview-arm64
-dist/api-automation-wails-preview-amd64
+dist/api-automation-arm64
+dist/api-automation-amd64
 ```
 
 ## Universal package, signing, and notarization
@@ -79,11 +79,11 @@ Run these checks on both a supported Apple Silicon Mac and the supported Intel b
 
 - Launch from Finder after downloading the signed/notarized ZIP; Gatekeeper produces no override prompt.
 - Confirm the app name, bundle identity, window lifecycle, native open-folder/open-file/save dialogs, and keyboard navigation.
-- Confirm Application Support paths are distinct and contain no plaintext credential or cookie.
+- Confirm Application Support paths contain no plaintext credential or cookie.
 - Connect to an isolated Fiery using its expected self-signed TLS behavior; test wrong credentials and cancellation without credential leakage.
 - Discover capabilities, inspect saved evidence, and verify direct `EFPageRange` plus the leading U+FEFF output-profile wire identity.
 - Exercise one approved lifecycle case, cancellation, external Busy-to-Idle monitoring, wake/sleep recovery, server presets, manual job action confirmation, and a large Excel export.
 - Exercise restart/reboot/clear only on an isolated target with explicit approved jobs and exact native confirmations.
-- Compare Wails result rows, complete JSONL records, Excel output, logs, and Fiery state against Gio.
+- Compare repeated-run result rows, complete JSONL records, Excel output, logs, and Fiery state against an accepted baseline.
 
-Record OS, CPU architecture, Fiery model/version, build hash, test data, operation IDs, and outcomes in the regression checklist. Any unsafe difference keeps Gio as production and blocks Stage 8 adoption.
+Record OS, CPU architecture, Fiery model/version, build hash, test data, operation IDs, and outcomes in the regression checklist. Any unsafe difference blocks the macOS release.

@@ -11,9 +11,9 @@ This document captures durable project rules and discussion points for quick ret
 ## Technology stack
 
 - Language: Go
-- Desktop UI: Gio (`gioui.org`), with Windigo used only for native Windows dialogs.
-- Target platform: Windows desktop application.
-- GUI threading rule: run Gio through `app.Main`; protect background state with synchronization and request redraws with `Window.Invalidate`.
+- Desktop UI: Wails 3 with a dependency-light HTML/CSS/JavaScript frontend and native Wails dialogs.
+- Target platforms: Windows and macOS desktop applications.
+- UI integration rule: keep Fiery credentials, protocol logic, planning, execution, and mutable workflow state in Go services; expose generated DTOs/events and never recreate backend semantics in JavaScript.
 
 ## Engineering expectations
 
@@ -78,7 +78,7 @@ The application must be:
 - For Expected Constraint Rejection, default to Validation Only on a disposable held job. An explicit expected conflict is PASS, absence of the conflict is FAIL, and timeouts, unavailable endpoints, HTTP 500, unrelated rejections, server failures, or cleanup failures are ERROR. Controlled Apply must require a locally proven conflict and isolated disposable jobs.
 - GUI shutdown must cancel the root application context, stop accepting background work, wait only for a bounded interval, and avoid long blocking result-file synchronization.
 - Preserve UI responsiveness during automation runs.
-- Keep widget mutation on the Gio event goroutine; synchronize shared background state and call `Window.Invalidate` after updates.
+- Synchronize shared backend state, publish bounded typed events, and keep network or automation work off frontend event handlers.
 - Prefer clean spacing, predictable labels, and operational clarity over decorative complexity.
 - Current UX direction is documented in `docs/ux.md`.
 
