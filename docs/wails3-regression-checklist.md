@@ -15,6 +15,9 @@ This is the parity gate for the validated Gio fallback and each Wails preview bu
 - [x] No `os/exec`, `exec.Command`, or `curl` execution reference in `internal/appgio` or `internal/fiery`
 - [x] Secret-injected Windows GUI build, PE subsystem 2, and embedded-secret byte verification
 - [x] Windows startup/close smoke test with no shell or curl children and graceful `WM_CLOSE`
+- [x] Exact Wails runtime/CLI `v3.0.0-beta.16` pin and byte-reproducible name-based bindings
+- [x] Frontend lockfile/audit, JavaScript syntax, no source maps, and no configured-secret bytes in assets
+- [x] Distinct production-tag Wails preview build, visual startup inspection, and graceful no-shell-child close
 
 ## Live Fiery parity checks
 
@@ -55,4 +58,5 @@ These checks require the operator's target server, credentials, approved files, 
 - Extracted Gio core automated gate: **PASS**
 - Extracted Gio desktop startup/close smoke: **PASS**
 - Extracted Gio live Fiery checklist: **PENDING operator environment**
-- Wails side-by-side checklist: **PENDING Wails preview**
+- Wails read-only shell gate: **PASS**
+- Wails live connection/capability and mutation side-by-side checklist: **PENDING operator environment and Stage 6 parity**

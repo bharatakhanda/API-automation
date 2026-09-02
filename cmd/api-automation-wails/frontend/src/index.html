@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>API Automation Preview</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">A</span><div><strong>API Automation</strong><small>Wails 3 Preview</small></div></div>
+      <nav id="navigation" aria-label="Workspace">
+        <button class="nav active" data-page="connection">Connection</button>
+        <button class="nav gated" data-page="overview">Overview</button>
+        <button class="nav gated" data-page="capabilities">Capabilities</button>
+        <button class="nav locked" disabled>Test Settings <span>Later</span></button>
+        <button class="nav locked" disabled>Job Properties <span>Later</span></button>
+        <button class="nav locked" disabled>Automation <span>Later</span></button>
+        <button class="nav locked" disabled>Results <span>Later</span></button>
+        <button class="nav locked" disabled>Administration <span>Later</span></button>
+      </nav>
+      <div class="preview-note">Read-only preview. Gio remains the production application.</div>
+    </aside>
+
+    <main>
+      <header><div><p class="eyebrow">FIERY API WORKSPACE</p><h1 id="page-title">Server connection</h1><p id="page-subtitle">Test and explicitly apply a server before opening the preview workspace.</p></div><span id="connection-badge" class="badge neutral">Not connected</span></header>
+      <div id="notice" class="notice" role="status" aria-live="polite">Loading backend state…</div>
+
+      <section id="page-connection" class="page active">
+        <div class="card narrow">
+          <h2>Server credentials</h2>
+          <p>Credentials stay in the Go backend and are never returned to this frontend.</p>
+          <label>Server address<input id="server-ip" autocomplete="off" placeholder="10.0.0.25 or fiery.example"></label>
+          <label>Secret / API key<input id="secret-key" type="password" autocomplete="new-password" placeholder="Required, or leave blank to keep configured"></label>
+          <label>Administrator password<input id="password" type="password" autocomplete="new-password" placeholder="Required, or leave blank to keep configured"></label>
+          <div id="test-state" class="inline-state">Not tested</div>
+          <div class="actions"><button id="test-connection" class="secondary">Test connection</button><button id="apply-connection" class="primary" disabled>Apply connection</button><button id="cancel-change" class="ghost" hidden>Cancel change</button></div>
+        </div>
+      </section>
+
+      <section id="page-overview" class="page">
+        <div class="metrics">
+          <article class="metric"><span>Server</span><strong id="overview-server">—</strong><small id="overview-model">Awaiting status</small></article>
+          <article class="metric"><span>Fiery status</span><strong id="overview-status">—</strong><small id="overview-detail">No status check yet</small></article>
+          <article class="metric"><span>Capabilities</span><strong id="overview-options">0</strong><small>read-only controls discovered</small></article>
+        </div>
+        <div class="card"><div class="card-heading"><div><h2>Live overview</h2><p>Status is read through the shared authenticated Go client.</p></div><button id="refresh-overview" class="secondary">Refresh status</button></div><p id="overview-checked" class="muted">Not checked</p></div>
+      </section>
+
+      <section id="page-capabilities" class="page">
+        <div class="card"><div class="card-heading"><div><h2>Read-only Job Properties</h2><p>Discovery uses the same Fiery client, parser, taxonomy, and exact wire IDs as Gio.</p></div><button id="discover-capabilities" class="primary">Get capabilities</button></div><div class="toolbar"><input id="capability-search" placeholder="Search labels, IDs, groups, or values"><span id="capability-summary" class="muted">Not loaded</span></div><div id="capability-list" class="capability-list"><div class="empty">Discover capabilities to inspect the normalized model.</div></div></div>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

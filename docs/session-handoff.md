@@ -7,20 +7,21 @@ Updated: 2026-09-02
 - Root: `C:\Users\harsh\Desktop\API_Automation`
 - Repository: `https://github.com/bharatakhanda/API-automation`
 - Stable branch: `main`
-- Active branch: `main`
+- Active branch: `feature/wails3-ui`
 - Stable baseline tags: `gio-stable-20260902` and `wails-core-extracted-20260902`
-- Built EXE: `C:\Users\harsh\Desktop\API_Automation\bin\api-automation.exe`
+- Production Gio EXE: `C:\Users\harsh\Desktop\API_Automation\bin\api-automation.exe`
+- Wails preview EXE: `C:\Users\harsh\Desktop\API_Automation\bin\api-automation-wails-preview.exe`
 - Do not commit or push `DATA/`, `.local/`, captures, logs, result files, executables, or secrets.
 - The user has explicitly authorized logical commits and pushes throughout the backend extraction and Wails 3 introduction. Report after each completed stage with pending work and the next task.
 - The Fiery secret key is injected into the EXE by linker flag from `.local/secrets.json`; it is not committed or printed.
 
 ## Git state at handoff
 
-- `main` and `origin/main` include the integrated platform-neutral core; generated executables, captures, logs, results, `.local/`, and secrets remain excluded.
+- `main` and `origin/main` include the integrated platform-neutral core at merge `042ad84`; generated executables, captures, logs, results, `.local/`, and secrets remain excluded.
 - `gio-stable-20260902` marks the rollback point before extraction; `wails-core-extracted-20260902` marks the validated Gio checkpoint before introducing Wails.
 - Latest implementation work fixes custom-range planning so non-empty text cannot silently send bare `Range1`, and combines `/status` with captured plus bounded recent-job workload evidence so externally started jobs show Busy.
 - Wails migration architecture, invariants, stage gates, beta risk, and rollback policy are recorded in `docs/wails3-migration-plan.md`.
-- Stages 1 through 4 are complete: platform-neutral planning, execution, lifecycle/readback, typed events, connection state, monitoring policy/generation guards, preset mapping, and administration safeguards now live under `internal/application`; temporary connection/administration mirrors are removed and Gio remains the production adapter and fallback.
+- Stages 1 through 5 are complete: the platform-neutral core is integrated, and a separate read-only Wails 3 shell now provides navigation, connection test/apply, Overview status, and capability inspection while Gio remains production and all mutation controls stay disabled.
 - Implementation commits:
   - `1d4044a feat: add categorized constraint-aware capability metadata`
   - `c6f2a3e feat: add secure local settings preset store`
@@ -51,6 +52,14 @@ Updated: 2026-09-02
 - Safe local-preset capture and reconciliation now canonicalize current wire values, migrate legacy page-range data, clamp limits, reject stale options/server presets/modes, and report skipped values before Gio mutates controls.
 - Administration interlocks, server-bound expiring inventory leases, exact confirmation, count revalidation, clear acceptance, empty verification, and recovery status polling are headlessly tested application safeguards.
 - `internal/appgio` converts Gio widget state to application DTOs, binds Fiery HTTP/session adapters, consumes typed events, invokes native confirmations, and retains adapter tests. No business logic was introduced in TypeScript.
+
+### Wails read-only preview
+
+- Wails runtime and CLI are exactly pinned to `v3.0.0-beta.16`; the previous machine-wide alpha CLI was replaced before binding generation.
+- `cmd/api-automation-wails` embeds a dependency-free, npm-lockfile-controlled frontend and uses the distinct `API Automation Preview` identity and `api-automation-wails-preview.exe` output.
+- `internal/appwails.Service` exposes seven methods only: safe state, connection test/apply/change/cancel, Overview refresh, and read-only capability discovery. Credentials and session cookies remain private Go state and are absent from response DTOs/assets.
+- Generated name-based bindings use the bundled Wails runtime, are byte-for-byte reproducible, and include no source maps. `tools/build-wails-preview.ps1` verifies the CLI pin, lockfile install, frontend secret absence, Windows subsystem, and embedded backend secret without printing it.
+- Test Settings, Job Properties, Automation, Results, and Administration are visibly disabled pending Stage 6 parity implementation.
 
 ### Workspace UX
 
@@ -113,7 +122,7 @@ Updated: 2026-09-02
 
 ## Validation
 
-The following passed again at the Stage 4 extracted-core integration checkpoint:
+The following passed again after the Stage 5 Wails read-only shell:
 
 - `gofmt -w internal`
 - `go test ./...`
@@ -128,7 +137,15 @@ The following passed again at the Stage 4 extracted-core integration checkpoint:
 - Secret-injected Windows GUI build with `-trimpath -s -w -H=windowsgui`
 - PE subsystem verification: Windows GUI (`Subsystem 2`)
 - Embedded-secret byte verification without printing the key
-- GUI startup smoke test, no `cmd`/`curl`/PowerShell child process, graceful `WM_CLOSE`, exit code 0
+- Gio GUI startup smoke test, no `cmd`/`curl`/PowerShell child process, graceful `WM_CLOSE`, exit code 0
+- Exact Wails CLI/runtime `v3.0.0-beta.16` pin, deterministic bundled-runtime binding regeneration, npm lock/audit, JavaScript syntax, and no-source-map checks
+- Secret-safe production-tag Wails preview build, visual inspection, no-shell-child startup, and graceful `WM_CLOSE`
+
+Stage 5 Wails preview checkpoint (Windows GUI subsystem 2, 13,502,976 bytes; UTC build timestamp `2026-09-02T06:25:19.1897938Z`) SHA-256:
+
+`F573DB3B3500E182252D6017040032AB075B3004A1F11A290D735D03714FD501`
+
+The Wails preview also passed visual inspection, frontend lock/audit/syntax checks, byte-reproducible binding generation, absence of frontend source maps/configured-secret bytes, no-shell-child startup, and graceful `WM_CLOSE`. The Wails macOS shell cannot be cross-compiled correctly from Windows with `CGO_ENABLED=0`; its native compile/package gate remains assigned to the macOS stage. Platform-neutral Darwin ARM64 package compilation still passes.
 
 Stage 4 secret-injected GUI checkpoint (Windows GUI subsystem 2, 17,332,224 bytes; UTC build timestamp `2026-09-02T06:03:44.4838064Z`) SHA-256:
 
@@ -157,8 +174,8 @@ Stable rollback executable SHA-256 remains:
 
 - Wails 3 is currently available as beta through `v3.0.0-beta.16`, not a GA release. It will be pinned exactly and introduced only after backend extraction.
 - The platform-neutral core is integrated on `main`; Gio remains the production shell and validated fallback.
-- Stage 5 starts on a separate `feature/wails3-ui` branch, followed by side-by-side Windows parity before macOS packaging.
-- Stages 1 through 4 are complete and validated. Stage 5 is next: pin Wails `v3.0.0-beta.16`, add a distinct preview command/data identity, and implement shutdown, navigation, connection, Overview, and read-only capabilities without enabling mutations.
+- `feature/wails3-ui` contains the Wails preview and remains separate pending side-by-side Windows parity.
+- Stages 1 through 5 are complete and validated. Stage 6 is next: add file dialogs/Test Settings, safe local and server-preset controls, Job Properties/search/numeric/custom-range rendering, planning preview, automation event consumption/cancellation, results/logs/export, and guarded administration in the staged order.
 - Full sequencing and verification requirements are in `docs/wails3-migration-plan.md`; reusable automated/live parity evidence is in `docs/wails3-regression-checklist.md`.
 
 ## Recommended live validation

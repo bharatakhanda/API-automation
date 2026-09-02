@@ -5,13 +5,21 @@ go 1.26.7
 require (
 	gioui.org v0.10.2
 	github.com/rodrigocfd/windigo v0.2.6
+	github.com/wailsapp/wails/v3 v3.0.0-beta.16
 	github.com/xuri/excelize/v2 v2.11.0
 	golang.org/x/term v0.45.0
 )
 
 require (
 	gioui.org/shader v1.0.9 // indirect
+	github.com/adrg/xdg v0.5.3 // indirect
+	github.com/coder/websocket v1.8.14 // indirect
+	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-text/typesetting v0.3.4 // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
+	github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/richardlehane/mscfb v1.0.7 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect

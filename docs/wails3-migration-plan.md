@@ -207,6 +207,8 @@ Deliverables:
 
 Exit gate: preview launches and exits cleanly on Windows; no mutation workflows are enabled yet.
 
+Status (2026-09-02): complete on `feature/wails3-ui`. Both the Go module and installed generation CLI are pinned to `v3.0.0-beta.16`. `cmd/api-automation-wails` embeds a dependency-free, lockfile-controlled frontend under a distinct application/window identity and builds only as `bin/api-automation-wails-preview.exe`. `internal/appwails` exposes credential-safe connection snapshots, exact-draft test/apply, manual Overview refresh, and normalized read-only capability DTOs; no automation, job, preset mutation, file, result, or administration method is bound. Generated name-based bindings use the bundled Wails runtime and reproduce byte-for-byte. The production-tag Windows preview passed PE subsystem/embedded-secret/frontend-secret checks, visual startup inspection, no-shell-child smoke, and graceful `WM_CLOSE`; Gio remains unchanged and production-authoritative.
+
 ### Stage 6 — Wails Windows parity
 
 Order:

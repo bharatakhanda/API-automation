@@ -1,6 +1,6 @@
 # API Automation
 
-Windows desktop automation for Fiery job import, lifecycle execution, attribute updates, and readback verification. The GUI is written in Go with Gio; native Windows dialogs use Windigo.
+Desktop automation for Fiery job import, lifecycle execution, attribute updates, and readback verification. The validated production GUI remains Go/Gio with native Windigo dialogs. A separate read-only Wails 3 beta preview now exercises the same Go backend for connection, Overview, and capability discovery.
 
 ## Capabilities
 
@@ -39,16 +39,24 @@ go test -race ./...
 go vet -all ./...
 staticcheck ./...
 go build -trimpath -ldflags "-s -w -H=windowsgui" -o bin/api-automation.exe ./cmd/api-automation
+
+# Requires the exactly pinned Wails CLI and ignored .local/secrets.json
+.\tools\build-wails-preview.ps1
+.\.local\gui-smoke-test.ps1 -ExePath '.\bin\api-automation-wails-preview.exe'
 ```
+
+The Wails runtime and CLI are pinned to `v3.0.0-beta.16`; verify/install the CLI with `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16`. The preview has a distinct name, command, executable, and frontend lockfile. Mutation workflows remain disabled until their parity stages.
 
 `internal/fiery.DefaultSecretKey` is empty in source. If a field build needs a default key, inject it with `-ldflags -X` from ignored local secret storage. Never commit credentials, `.local/`, `DATA/`, generated captures, logs, or executables.
 
 ## Project layout
 
 ```text
-cmd/api-automation             GUI entrypoint
+cmd/api-automation             Production Gio entrypoint
+cmd/api-automation-wails       Wails 3 preview entrypoint and locked frontend
 cmd/fiery-readback-probe       Standalone diagnostic probe
 internal/appgio                Gio desktop UI and execution adapter
+internal/appwails              Credential-safe Wails service/DTO adapter
 internal/application           Platform-neutral planning, runner, state, lifecycle, safeguards, and events
 internal/fiery                 Fiery HTTP client and capability discovery
 internal/capabilities          Capability normalization and taxonomy
