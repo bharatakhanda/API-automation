@@ -154,7 +154,7 @@ Stage 6 Gio fallback checkpoint (Windows GUI subsystem 2, 17,332,224 bytes; UTC 
 
 `EC031951802FCA82946C3BF1D960C89856224B18799313072C5A5243519AF4A7`
 
-Both Windows executables passed simultaneous side-by-side startup, no-shell-child inspection, and graceful close. The Wails preview also passed visual inspection, frontend lock/audit/syntax checks, byte-reproducible binding generation, and absence of frontend source maps/configured-secret bytes. Windows `CGO_ENABLED=0` cross-compilation is not used as a Wails release gate. GitHub Actions run `33603768527` passed native macOS arm64/x86_64 builds and universal unsigned packaging; the ZIP SHA-256 is `367dcd15cbc0237e92a514c66cd9e6e5b64dab4d317d075ca8186b75e0926c03`. Platform-neutral Darwin ARM64 package compilation also passes.
+Both Windows executables passed simultaneous side-by-side startup, no-shell-child inspection, and graceful close. The Wails preview also passed visual inspection, frontend lock/audit/syntax checks, byte-reproducible binding generation, and absence of frontend source maps/configured-secret bytes. Windows `CGO_ENABLED=0` cross-compilation is not used as a Wails release gate. GitHub Actions run `33605065116` passed native macOS arm64/x86_64 builds and universal unsigned packaging; the ZIP SHA-256 is `575405a6f8022031aa42613e9db0b8fc1187c350c11c8790c8128125ab9ce9e7`. Platform-neutral Darwin ARM64 package compilation also passes.
 
 Stage 4 secret-injected GUI checkpoint (Windows GUI subsystem 2, 17,332,224 bytes; UTC build timestamp `2026-09-02T06:03:44.4838064Z`) SHA-256:
 
