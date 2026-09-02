@@ -1,0 +1,104 @@
+name: Wails macOS preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/wails3-ui
+    paths:
+      - ".github/workflows/wails-macos-preview.yml"
+      - "cmd/api-automation-wails/**"
+      - "internal/application/**"
+      - "internal/appwails/**"
+      - "internal/capabilities/**"
+      - "internal/fiery/**"
+      - "internal/files/**"
+      - "internal/joboutcome/**"
+      - "internal/pagevalues/**"
+      - "internal/preflight/**"
+      - "internal/presets/**"
+      - "internal/rangevalues/**"
+      - "internal/reportxlsx/**"
+      - "go.mod"
+      - "go.sum"
+
+permissions:
+  contents: read
+
+jobs:
+  native-build:
+    name: ${{ matrix.arch }} native build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cmd/api-automation-wails/frontend/package-lock.json
+
+      - name: Verify pinned Wails CLI
+        shell: bash
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+          test "$(wails3 version 2>&1)" = "v3.0.0-beta.16"
+
+      - name: Verify backend on macOS
+        shell: bash
+        run: |
+          packages=$(go list ./internal/... | grep -v '/internal/appgio$' | tr '\n' ' ')
+          go test $packages
+          go test -race ./internal/application ./internal/appwails
+          go vet $packages
+          go mod verify
+          test -z "$(go mod tidy -diff)"
+
+      - name: Verify and build frontend
+        working-directory: cmd/api-automation-wails/frontend
+        shell: bash
+        run: |
+          npm ci --ignore-scripts
+          npm audit --package-lock-only
+          node --check src/app.js
+          node --check build.mjs
+          if find src bundle -type f -name '*.map' | grep -q .; then
+            echo "Source maps are not allowed in preview assets" >&2
+            exit 1
+          fi
+          npm run build
+
+      - name: Verify generated bindings
+        shell: bash
+        run: |
+          wails3 generate bindings -b -names -d cmd/api-automation-wails/frontend/src/bindings ./cmd/api-automation-wails
+          git diff --exit-code -- cmd/api-automation-wails/frontend/src/bindings
+
+      - name: Build unsigned native preview
+        shell: bash
+        run: |
+          mkdir -p dist
+          go build -tags production -trimpath -ldflags '-s -w' -o "dist/api-automation-wails-preview-${{ matrix.arch }}" ./cmd/api-automation-wails
+          file "dist/api-automation-wails-preview-${{ matrix.arch }}"
+          shasum -a 256 "dist/api-automation-wails-preview-${{ matrix.arch }}" > "dist/api-automation-wails-preview-${{ matrix.arch }}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api-automation-wails-macos-${{ matrix.arch }}-unsigned
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
