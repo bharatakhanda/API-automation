@@ -184,7 +184,8 @@ Stable rollback executable SHA-256 remains:
 - The platform-neutral core is integrated on `main`; Gio remains the production shell and validated fallback.
 - `feature/wails3-ui` contains the full Windows-parity implementation and remains separate pending controlled live Fiery validation.
 - Stages 1 through 5 are complete; Stage 6 implementation and automated/desktop gates pass, but its controlled live Fiery rows remain pending.
-- Stage 7 native compile is now covered on arm64 and x86_64 GitHub macOS runners, with universal packaging in `.github/workflows/wails-macos-preview.yml`. Follow `docs/wails3-macos-release.md`; signing/notarization and interactive Fiery/UI/wake-sleep/large-export gates still require Apple credentials, physical Macs, and the operator environment.
+- Stage 7 native compile is covered on arm64 and x86_64 GitHub macOS runners, with universal packaging in `.github/workflows/wails-macos-preview.yml`. Follow `docs/wails3-macos-release.md`; signing/notarization and interactive Fiery/UI/wake-sleep/large-export gates still require Apple credentials, physical Macs, and the operator environment.
+- Stage 8 preparation is complete: use `docs/wails3-field-adoption.md` for each controlled cycle and `cmd/compare-automation-results` for order-independent complete-record comparison. Promotion remains blocked until repeated accepted cycles and explicit release-owner approval; Gio retirement is a separate future decision.
 - Full sequencing and verification requirements are in `docs/wails3-migration-plan.md`; reusable automated/live parity evidence is in `docs/wails3-regression-checklist.md`.
 
 ## Recommended live validation

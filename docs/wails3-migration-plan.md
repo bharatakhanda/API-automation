@@ -247,6 +247,8 @@ Status (2026-09-02): native compilation and unsigned packaging are automated by 
 - Keep rollback artifacts and configuration migration reversible.
 - Retire Gio only after explicit acceptance; removal is a separate logical commit and release decision.
 
+Status (2026-09-02): adoption preparation is complete, but promotion is intentionally blocked. `docs/wails3-field-adoption.md` defines repeatable cycle metadata, evidence, acceptance, promotion, and rollback rules. `cmd/compare-automation-results` compares complete Gio/Wails JSONL records as order-independent semantic multisets while ignoring only generated job IDs and durations; differences retain lifecycle/verdict/status/error/detail and exact set/get evidence. No beta/default promotion or Gio retirement occurs until Stage 6 live parity, Stage 7 signing/notarization/interactive checks, repeated accepted field cycles, and explicit release-owner approval.
+
 ## Verification matrix
 
 Every backend-extraction commit must run:

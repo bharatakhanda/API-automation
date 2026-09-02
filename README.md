@@ -47,6 +47,8 @@ go build -trimpath -ldflags "-s -w -H=windowsgui" -o bin/api-automation.exe ./cm
 
 The Wails runtime and CLI are pinned to `v3.0.0-beta.16`; verify/install the CLI with `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16`. The preview has a distinct name, command, executable, data directory, and frontend lockfile. It now exposes mutation workflows through the shared backend, but remains a preview until the controlled live parity checklist is approved; use Gio as the production fallback. Native universal macOS build, signing, and acceptance gates are documented in `docs/wails3-macos-release.md`.
 
+During controlled adoption cycles, compare complete Gio/Wails JSONL stores with `go run ./cmd/compare-automation-results -gio <gio.jsonl> -wails <wails.jsonl>` and record the cycle using `docs/wails3-field-adoption.md`.
+
 `internal/fiery.DefaultSecretKey` is empty in source. If a field build needs a default key, inject it with `-ldflags -X` from ignored local secret storage. Never commit credentials, `.local/`, `DATA/`, generated captures, logs, or executables.
 
 ## Project layout
@@ -55,6 +57,7 @@ The Wails runtime and CLI are pinned to `v3.0.0-beta.16`; verify/install the CLI
 cmd/api-automation             Production Gio entrypoint
 cmd/api-automation-wails       Wails 3 preview entrypoint and locked frontend
 cmd/fiery-readback-probe       Standalone diagnostic probe
+cmd/compare-automation-results Semantic Gio/Wails JSONL comparison tool
 internal/appgio                Gio desktop UI and execution adapter
 internal/appwails              Credential-safe Wails service/DTO adapter
 internal/application           Platform-neutral planning, runner, state, lifecycle, safeguards, and events
@@ -63,5 +66,6 @@ internal/capabilities          Capability normalization and taxonomy
 internal/combinations          Bounded Cartesian, pairwise, and random generation
 internal/files                 Supported test-file selection
 internal/preflight             Environment checks and snapshots
-tools                          Diagnostic launch scripts
+internal/resultcompare         Order-independent field-result comparison
+tools                          Build, package, and diagnostic scripts
 ```
