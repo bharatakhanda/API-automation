@@ -19,18 +19,31 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	service := appwails.NewService(fiery.DefaultSecretKey)
-	app := wails.New(wails.Options{
+	dialogs := new(nativeDialogs)
+	var app *wails.App
+	service := appwails.NewService(fiery.DefaultSecretKey, appwails.Options{
+		Dialogs: dialogs,
+		EventEmitter: func(name string, data any) {
+			if app != nil {
+				app.Event.Emit(name, data)
+			}
+		},
+	})
+	app = wails.New(wails.Options{
 		Name:        "API Automation Preview",
-		Description: "Read-only Wails 3 preview for Fiery API Automation",
+		Description: "Wails 3 preview for Fiery API Automation",
 		Services: []wails.Service{
 			wails.NewService(service),
 		},
 		Assets: wails.AssetOptions{Handler: wails.BundledAssetFileServer(assets)},
+		OnShutdown: func() {
+			appwails.Shutdown(service)
+		},
 		Mac: wails.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
+	dialogs.app = app
 	app.Window.NewWithOptions(wails.WebviewWindowOptions{
 		Name:            "api-automation-preview",
 		Title:           "API Automation · Wails Preview",

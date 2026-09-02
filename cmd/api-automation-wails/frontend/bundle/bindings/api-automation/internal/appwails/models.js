@@ -9,6 +9,265 @@ import { Create as $Create } from "/wails/runtime.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as application$0 from "../application/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as reportxlsx$0 from "../reportxlsx/models.js";
+
+export class AdministrationView {
+    /**
+     * Creates a new AdministrationView instance.
+     * @param {Partial<AdministrationView>} [$$source = {}] - The source object to create the AdministrationView.
+     */
+    constructor($$source = {}) {
+        if (!("inventory" in $$source)) {
+            /**
+             * @member
+             * @type {application$0.InventorySnapshot}
+             */
+            this["inventory"] = (new application$0.InventorySnapshot());
+        }
+        if (!("message" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["message"] = "";
+        }
+        if (!("accepted" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["accepted"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AdministrationView instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AdministrationView}
+     */
+    static createFrom($$source = {}) {
+        const $$createField0_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("inventory" in $$parsedSource) {
+            $$parsedSource["inventory"] = $$createField0_0($$parsedSource["inventory"]);
+        }
+        return new AdministrationView(/** @type {Partial<AdministrationView>} */($$parsedSource));
+    }
+}
+
+export class AutomationInput {
+    /**
+     * Creates a new AutomationInput instance.
+     * @param {Partial<AutomationInput>} [$$source = {}] - The source object to create the AutomationInput.
+     */
+    constructor($$source = {}) {
+        if (!("files" in $$source)) {
+            /**
+             * @member
+             * @type {FileSelection}
+             */
+            this["files"] = (new FileSelection());
+        }
+        if (!("plan" in $$source)) {
+            /**
+             * @member
+             * @type {PlanningInput}
+             */
+            this["plan"] = (new PlanningInput());
+        }
+        if (!("workers" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["workers"] = 0;
+        }
+        if (!("runModeIds" in $$source)) {
+            /**
+             * @member
+             * @type {string[]}
+             */
+            this["runModeIds"] = [];
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["serverPresetId"] = undefined;
+        }
+        if (!("constraintMode" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["constraintMode"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AutomationInput instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AutomationInput}
+     */
+    static createFrom($$source = {}) {
+        const $$createField0_0 = $$createType1;
+        const $$createField1_0 = $$createType2;
+        const $$createField3_0 = $$createType3;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("files" in $$parsedSource) {
+            $$parsedSource["files"] = $$createField0_0($$parsedSource["files"]);
+        }
+        if ("plan" in $$parsedSource) {
+            $$parsedSource["plan"] = $$createField1_0($$parsedSource["plan"]);
+        }
+        if ("runModeIds" in $$parsedSource) {
+            $$parsedSource["runModeIds"] = $$createField3_0($$parsedSource["runModeIds"]);
+        }
+        return new AutomationInput(/** @type {Partial<AutomationInput>} */($$parsedSource));
+    }
+}
+
+export class AutomationState {
+    /**
+     * Creates a new AutomationState instance.
+     * @param {Partial<AutomationState>} [$$source = {}] - The source object to create the AutomationState.
+     */
+    constructor($$source = {}) {
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["operationId"] = undefined;
+        }
+        if (!("status" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["status"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["error"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["storageError"] = undefined;
+        }
+        if (!("progress" in $$source)) {
+            /**
+             * @member
+             * @type {application$0.RunProgressEvent}
+             */
+            this["progress"] = (new application$0.RunProgressEvent());
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {reportxlsx$0.Result[] | undefined}
+             */
+            this["results"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["logs"] = undefined;
+        }
+        if (!("resultsTruncated" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["resultsTruncated"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["startedAt"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["completedAt"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["strategy"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["serverPreset"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["runModes"] = undefined;
+        }
+        if (!("resultFileReady" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["resultFileReady"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AutomationState instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AutomationState}
+     */
+    static createFrom($$source = {}) {
+        const $$createField4_0 = $$createType4;
+        const $$createField5_0 = $$createType6;
+        const $$createField6_0 = $$createType3;
+        const $$createField12_0 = $$createType3;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("progress" in $$parsedSource) {
+            $$parsedSource["progress"] = $$createField4_0($$parsedSource["progress"]);
+        }
+        if ("results" in $$parsedSource) {
+            $$parsedSource["results"] = $$createField5_0($$parsedSource["results"]);
+        }
+        if ("logs" in $$parsedSource) {
+            $$parsedSource["logs"] = $$createField6_0($$parsedSource["logs"]);
+        }
+        if ("runModes" in $$parsedSource) {
+            $$parsedSource["runModes"] = $$createField12_0($$parsedSource["runModes"]);
+        }
+        return new AutomationState(/** @type {Partial<AutomationState>} */($$parsedSource));
+    }
+}
 
 export class CapabilityOption {
     /**
@@ -93,6 +352,13 @@ export class CapabilityOption {
              */
             this["precision"] = undefined;
         }
+        if (!("constraintCount" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["constraintCount"] = 0;
+        }
 
         Object.assign(this, $$source);
     }
@@ -103,7 +369,7 @@ export class CapabilityOption {
      * @returns {CapabilityOption}
      */
     static createFrom($$source = {}) {
-        const $$createField4_0 = $$createType0;
+        const $$createField4_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("values" in $$parsedSource) {
             $$parsedSource["values"] = $$createField4_0($$parsedSource["values"]);
@@ -181,6 +447,27 @@ export class CapabilityView {
              */
             this["options"] = [];
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["preflightStatus"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["capturePaths"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["captureWarnings"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -191,14 +478,22 @@ export class CapabilityView {
      * @returns {CapabilityView}
      */
     static createFrom($$source = {}) {
-        const $$createField7_0 = $$createType2;
-        const $$createField8_0 = $$createType4;
+        const $$createField7_0 = $$createType8;
+        const $$createField8_0 = $$createType10;
+        const $$createField10_0 = $$createType3;
+        const $$createField11_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("presets" in $$parsedSource) {
             $$parsedSource["presets"] = $$createField7_0($$parsedSource["presets"]);
         }
         if ("options" in $$parsedSource) {
             $$parsedSource["options"] = $$createField8_0($$parsedSource["options"]);
+        }
+        if ("capturePaths" in $$parsedSource) {
+            $$parsedSource["capturePaths"] = $$createField10_0($$parsedSource["capturePaths"]);
+        }
+        if ("captureWarnings" in $$parsedSource) {
+            $$parsedSource["captureWarnings"] = $$createField11_0($$parsedSource["captureWarnings"]);
         }
         return new CapabilityView(/** @type {Partial<CapabilityView>} */($$parsedSource));
     }
@@ -266,6 +561,13 @@ export class ConnectionResult {
              */
             this["message"] = "";
         }
+        if (!("changed" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["changed"] = false;
+        }
 
         Object.assign(this, $$source);
     }
@@ -276,12 +578,152 @@ export class ConnectionResult {
      * @returns {ConnectionResult}
      */
     static createFrom($$source = {}) {
-        const $$createField0_0 = $$createType5;
+        const $$createField0_0 = $$createType11;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("connection" in $$parsedSource) {
             $$parsedSource["connection"] = $$createField0_0($$parsedSource["connection"]);
         }
         return new ConnectionResult(/** @type {Partial<ConnectionResult>} */($$parsedSource));
+    }
+}
+
+export class ExportResult {
+    /**
+     * Creates a new ExportResult instance.
+     * @param {Partial<ExportResult>} [$$source = {}] - The source object to create the ExportResult.
+     */
+    constructor($$source = {}) {
+        if (!("path" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["path"] = "";
+        }
+        if (!("total" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["total"] = 0;
+        }
+        if (!("passed" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["passed"] = 0;
+        }
+        if (!("failed" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["failed"] = 0;
+        }
+        if (!("errors" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["errors"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ExportResult instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ExportResult}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ExportResult(/** @type {Partial<ExportResult>} */($$parsedSource));
+    }
+}
+
+export class FileSelection {
+    /**
+     * Creates a new FileSelection instance.
+     * @param {Partial<FileSelection>} [$$source = {}] - The source object to create the FileSelection.
+     */
+    constructor($$source = {}) {
+        if (!("folderPath" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["folderPath"] = "";
+        }
+        if (!("filePath" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["filePath"] = "";
+        }
+        if (!("mode" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["mode"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FileSelection instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {FileSelection}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new FileSelection(/** @type {Partial<FileSelection>} */($$parsedSource));
+    }
+}
+
+export class JobActionResult {
+    /**
+     * Creates a new JobActionResult instance.
+     * @param {Partial<JobActionResult>} [$$source = {}] - The source object to create the JobActionResult.
+     */
+    constructor($$source = {}) {
+        if (!("jobId" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobId"] = "";
+        }
+        if (!("action" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["action"] = "";
+        }
+        if (!("message" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["message"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new JobActionResult instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {JobActionResult}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new JobActionResult(/** @type {Partial<JobActionResult>} */($$parsedSource));
     }
 }
 
@@ -362,6 +804,512 @@ export class Overview {
     }
 }
 
+export class PlanAxis {
+    /**
+     * Creates a new PlanAxis instance.
+     * @param {Partial<PlanAxis>} [$$source = {}] - The source object to create the PlanAxis.
+     */
+    constructor($$source = {}) {
+        if (!("id" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["id"] = "";
+        }
+        if (!("values" in $$source)) {
+            /**
+             * @member
+             * @type {string[]}
+             */
+            this["values"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PlanAxis instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {PlanAxis}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType3;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("values" in $$parsedSource) {
+            $$parsedSource["values"] = $$createField1_0($$parsedSource["values"]);
+        }
+        return new PlanAxis(/** @type {Partial<PlanAxis>} */($$parsedSource));
+    }
+}
+
+export class PlanView {
+    /**
+     * Creates a new PlanView instance.
+     * @param {Partial<PlanView>} [$$source = {}] - The source object to create the PlanView.
+     */
+    constructor($$source = {}) {
+        if (!("axes" in $$source)) {
+            /**
+             * @member
+             * @type {PlanAxis[]}
+             */
+            this["axes"] = [];
+        }
+        if (!("combinationCount" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["combinationCount"] = 0;
+        }
+        if (!("combinations" in $$source)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string }[]}
+             */
+            this["combinations"] = [];
+        }
+        if (!("constraintSkipped" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["constraintSkipped"] = 0;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["constraintWarning"] = undefined;
+        }
+        if (!("truncated" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["truncated"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PlanView instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {PlanView}
+     */
+    static createFrom($$source = {}) {
+        const $$createField0_0 = $$createType13;
+        const $$createField2_0 = $$createType15;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("axes" in $$parsedSource) {
+            $$parsedSource["axes"] = $$createField0_0($$parsedSource["axes"]);
+        }
+        if ("combinations" in $$parsedSource) {
+            $$parsedSource["combinations"] = $$createField2_0($$parsedSource["combinations"]);
+        }
+        return new PlanView(/** @type {Partial<PlanView>} */($$parsedSource));
+    }
+}
+
+export class PlanningInput {
+    /**
+     * Creates a new PlanningInput instance.
+     * @param {Partial<PlanningInput>} [$$source = {}] - The source object to create the PlanningInput.
+     */
+    constructor($$source = {}) {
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string[] } | undefined}
+             */
+            this["selectedValues"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string } | undefined}
+             */
+            this["numericInputs"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["copiesInput"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["customPageRange"] = undefined;
+        }
+        if (!("valueSource" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["valueSource"] = "";
+        }
+        if (!("strategy" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["strategy"] = "";
+        }
+        if (!("testIntent" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["testIntent"] = "";
+        }
+        if (!("maxCases" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["maxCases"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PlanningInput instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {PlanningInput}
+     */
+    static createFrom($$source = {}) {
+        const $$createField0_0 = $$createType16;
+        const $$createField1_0 = $$createType14;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("selectedValues" in $$parsedSource) {
+            $$parsedSource["selectedValues"] = $$createField0_0($$parsedSource["selectedValues"]);
+        }
+        if ("numericInputs" in $$parsedSource) {
+            $$parsedSource["numericInputs"] = $$createField1_0($$parsedSource["numericInputs"]);
+        }
+        return new PlanningInput(/** @type {Partial<PlanningInput>} */($$parsedSource));
+    }
+}
+
+export class PresetInput {
+    /**
+     * Creates a new PresetInput instance.
+     * @param {Partial<PresetInput>} [$$source = {}] - The source object to create the PresetInput.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string[] } | undefined}
+             */
+            this["selectedValues"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string } | undefined}
+             */
+            this["numericInputs"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["copiesInput"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["customPageRange"] = undefined;
+        }
+        if (!("strategy" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["strategy"] = "";
+        }
+        if (!("valueSource" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["valueSource"] = "";
+        }
+        if (!("testIntent" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["testIntent"] = "";
+        }
+        if (!("constraintMode" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["constraintMode"] = "";
+        }
+        if (!("maxCases" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["maxCases"] = "";
+        }
+        if (!("parallelJobs" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["parallelJobs"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["runModeLabels"] = undefined;
+        }
+        if (!("fileMode" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["fileMode"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["serverPresetId"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PresetInput instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {PresetInput}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType16;
+        const $$createField2_0 = $$createType14;
+        const $$createField11_0 = $$createType3;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("selectedValues" in $$parsedSource) {
+            $$parsedSource["selectedValues"] = $$createField1_0($$parsedSource["selectedValues"]);
+        }
+        if ("numericInputs" in $$parsedSource) {
+            $$parsedSource["numericInputs"] = $$createField2_0($$parsedSource["numericInputs"]);
+        }
+        if ("runModeLabels" in $$parsedSource) {
+            $$parsedSource["runModeLabels"] = $$createField11_0($$parsedSource["runModeLabels"]);
+        }
+        return new PresetInput(/** @type {Partial<PresetInput>} */($$parsedSource));
+    }
+}
+
+export class PresetLoadView {
+    /**
+     * Creates a new PresetLoadView instance.
+     * @param {Partial<PresetLoadView>} [$$source = {}] - The source object to create the PresetLoadView.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string[] } | undefined}
+             */
+            this["selectedValues"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string } | undefined}
+             */
+            this["numericInputs"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["copiesInput"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["customPageRange"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["strategy"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["valueSource"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["testIntent"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["constraintMode"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["maxCases"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["parallelJobs"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["fileMode"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["runModeLabels"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["serverPresetId"] = undefined;
+        }
+        if (!("skippedCount" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["skippedCount"] = 0;
+        }
+        if (!("differentServer" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["differentServer"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PresetLoadView instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {PresetLoadView}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType16;
+        const $$createField2_0 = $$createType14;
+        const $$createField12_0 = $$createType3;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("selectedValues" in $$parsedSource) {
+            $$parsedSource["selectedValues"] = $$createField1_0($$parsedSource["selectedValues"]);
+        }
+        if ("numericInputs" in $$parsedSource) {
+            $$parsedSource["numericInputs"] = $$createField2_0($$parsedSource["numericInputs"]);
+        }
+        if ("runModeLabels" in $$parsedSource) {
+            $$parsedSource["runModeLabels"] = $$createField12_0($$parsedSource["runModeLabels"]);
+        }
+        return new PresetLoadView(/** @type {Partial<PresetLoadView>} */($$parsedSource));
+    }
+}
+
+export class PresetSummary {
+    /**
+     * Creates a new PresetSummary instance.
+     * @param {Partial<PresetSummary>} [$$source = {}] - The source object to create the PresetSummary.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("updatedAt" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["updatedAt"] = "0001-01-01T00:00:00.000Z";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PresetSummary instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {PresetSummary}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new PresetSummary(/** @type {Partial<PresetSummary>} */($$parsedSource));
+    }
+}
+
 export class PreviewState {
     /**
      * Creates a new PreviewState instance.
@@ -389,6 +1337,13 @@ export class PreviewState {
              */
             this["capabilities"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["diagnosticPath"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -399,8 +1354,8 @@ export class PreviewState {
      * @returns {PreviewState}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType5;
-        const $$createField2_0 = $$createType7;
+        const $$createField1_0 = $$createType11;
+        const $$createField2_0 = $$createType18;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("connection" in $$parsedSource) {
             $$parsedSource["connection"] = $$createField1_0($$parsedSource["connection"]);
@@ -409,6 +1364,80 @@ export class PreviewState {
             $$parsedSource["capabilities"] = $$createField2_0($$parsedSource["capabilities"]);
         }
         return new PreviewState(/** @type {Partial<PreviewState>} */($$parsedSource));
+    }
+}
+
+export class ResolvedFiles {
+    /**
+     * Creates a new ResolvedFiles instance.
+     * @param {Partial<ResolvedFiles>} [$$source = {}] - The source object to create the ResolvedFiles.
+     */
+    constructor($$source = {}) {
+        if (!("files" in $$source)) {
+            /**
+             * @member
+             * @type {string[]}
+             */
+            this["files"] = [];
+        }
+        if (!("count" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["count"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ResolvedFiles instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ResolvedFiles}
+     */
+    static createFrom($$source = {}) {
+        const $$createField0_0 = $$createType3;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("files" in $$parsedSource) {
+            $$parsedSource["files"] = $$createField0_0($$parsedSource["files"]);
+        }
+        return new ResolvedFiles(/** @type {Partial<ResolvedFiles>} */($$parsedSource));
+    }
+}
+
+export class RunModeView {
+    /**
+     * Creates a new RunModeView instance.
+     * @param {Partial<RunModeView>} [$$source = {}] - The source object to create the RunModeView.
+     */
+    constructor($$source = {}) {
+        if (!("id" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["id"] = "";
+        }
+        if (!("label" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["label"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RunModeView instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {RunModeView}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RunModeView(/** @type {Partial<RunModeView>} */($$parsedSource));
     }
 }
 
@@ -447,12 +1476,92 @@ export class ServerPresetView {
     }
 }
 
+export class WorkspaceMetadata {
+    /**
+     * Creates a new WorkspaceMetadata instance.
+     * @param {Partial<WorkspaceMetadata>} [$$source = {}] - The source object to create the WorkspaceMetadata.
+     */
+    constructor($$source = {}) {
+        if (!("runModes" in $$source)) {
+            /**
+             * @member
+             * @type {RunModeView[]}
+             */
+            this["runModes"] = [];
+        }
+        if (!("defaultMaxCases" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["defaultMaxCases"] = 0;
+        }
+        if (!("maximumMaxCases" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["maximumMaxCases"] = 0;
+        }
+        if (!("defaultWorkers" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["defaultWorkers"] = 0;
+        }
+        if (!("maximumWorkers" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["maximumWorkers"] = 0;
+        }
+        if (!("overviewIntervalMs" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["overviewIntervalMs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new WorkspaceMetadata instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {WorkspaceMetadata}
+     */
+    static createFrom($$source = {}) {
+        const $$createField0_0 = $$createType20;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("runModes" in $$parsedSource) {
+            $$parsedSource["runModes"] = $$createField0_0($$parsedSource["runModes"]);
+        }
+        return new WorkspaceMetadata(/** @type {Partial<WorkspaceMetadata>} */($$parsedSource));
+    }
+}
+
 // Private type creation functions
-const $$createType0 = $Create.Array($Create.Any);
-const $$createType1 = ServerPresetView.createFrom;
-const $$createType2 = $Create.Array($$createType1);
-const $$createType3 = CapabilityOption.createFrom;
-const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = application$0.ConnectionSnapshot.createFrom;
-const $$createType6 = CapabilityView.createFrom;
-const $$createType7 = $Create.Nullable($$createType6);
+const $$createType0 = application$0.InventorySnapshot.createFrom;
+const $$createType1 = FileSelection.createFrom;
+const $$createType2 = PlanningInput.createFrom;
+const $$createType3 = $Create.Array($Create.Any);
+const $$createType4 = application$0.RunProgressEvent.createFrom;
+const $$createType5 = reportxlsx$0.Result.createFrom;
+const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = ServerPresetView.createFrom;
+const $$createType8 = $Create.Array($$createType7);
+const $$createType9 = CapabilityOption.createFrom;
+const $$createType10 = $Create.Array($$createType9);
+const $$createType11 = application$0.ConnectionSnapshot.createFrom;
+const $$createType12 = PlanAxis.createFrom;
+const $$createType13 = $Create.Array($$createType12);
+const $$createType14 = $Create.Map($Create.Any, $Create.Any);
+const $$createType15 = $Create.Array($$createType14);
+const $$createType16 = $Create.Map($Create.Any, $$createType3);
+const $$createType17 = CapabilityView.createFrom;
+const $$createType18 = $Create.Nullable($$createType17);
+const $$createType19 = RunModeView.createFrom;
+const $$createType20 = $Create.Array($$createType19);

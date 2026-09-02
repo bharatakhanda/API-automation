@@ -68,3 +68,101 @@ export class ConnectionSnapshot {
         return new ConnectionSnapshot(/** @type {Partial<ConnectionSnapshot>} */($$parsedSource));
     }
 }
+
+export class InventorySnapshot {
+    /**
+     * Creates a new InventorySnapshot instance.
+     * @param {Partial<InventorySnapshot>} [$$source = {}] - The source object to create the InventorySnapshot.
+     */
+    constructor($$source = {}) {
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["server"] = undefined;
+        }
+        if (!("count" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["count"] = 0;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["inspected"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new InventorySnapshot instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {InventorySnapshot}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new InventorySnapshot(/** @type {Partial<InventorySnapshot>} */($$parsedSource));
+    }
+}
+
+export class RunProgressEvent {
+    /**
+     * Creates a new RunProgressEvent instance.
+     * @param {Partial<RunProgressEvent>} [$$source = {}] - The source object to create the RunProgressEvent.
+     */
+    constructor($$source = {}) {
+        if (!("planned" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["planned"] = 0;
+        }
+        if (!("executed" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["executed"] = 0;
+        }
+        if (!("passed" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["passed"] = 0;
+        }
+        if (!("failed" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["failed"] = 0;
+        }
+        if (!("errors" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["errors"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RunProgressEvent instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {RunProgressEvent}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RunProgressEvent(/** @type {Partial<RunProgressEvent>} */($$parsedSource));
+    }
+}

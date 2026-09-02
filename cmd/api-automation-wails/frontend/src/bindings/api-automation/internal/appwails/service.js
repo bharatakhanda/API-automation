@@ -11,12 +11,39 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
+ * @returns {$CancellablePromise<$models.AdministrationView>}
+ */
+export function AdministrationState() {
+    return $Call.ByName("api-automation/internal/appwails.Service.AdministrationState").then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType0($result);
+    }));
+}
+
+/**
  * @param {$models.ConnectionDraft} input
  * @returns {$CancellablePromise<$models.ConnectionResult>}
  */
 export function ApplyConnection(input) {
     return $Call.ByName("api-automation/internal/appwails.Service.ApplyConnection", input).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType0($result);
+        return $$createType1($result);
+    }));
+}
+
+/**
+ * @returns {$CancellablePromise<$models.AutomationState>}
+ */
+export function AutomationState() {
+    return $Call.ByName("api-automation/internal/appwails.Service.AutomationState").then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType2($result);
+    }));
+}
+
+/**
+ * @returns {$CancellablePromise<$models.AutomationState>}
+ */
+export function CancelAutomation() {
+    return $Call.ByName("api-automation/internal/appwails.Service.CancelAutomation").then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType2($result);
     }));
 }
 
@@ -25,8 +52,36 @@ export function ApplyConnection(input) {
  */
 export function CancelConnectionChange() {
     return $Call.ByName("api-automation/internal/appwails.Service.CancelConnectionChange").then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType1($result);
+    }));
+}
+
+/**
+ * @param {string} confirmation
+ * @returns {$CancellablePromise<$models.AdministrationView>}
+ */
+export function ClearAllJobs(confirmation) {
+    return $Call.ByName("api-automation/internal/appwails.Service.ClearAllJobs", confirmation).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType0($result);
     }));
+}
+
+/**
+ * @param {string} action
+ * @returns {$CancellablePromise<$models.AdministrationView>}
+ */
+export function ControlServer(action) {
+    return $Call.ByName("api-automation/internal/appwails.Service.ControlServer", action).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType0($result);
+    }));
+}
+
+/**
+ * @param {string} name
+ * @returns {$CancellablePromise<void>}
+ */
+export function DeletePreset(name) {
+    return $Call.ByName("api-automation/internal/appwails.Service.DeletePreset", name);
 }
 
 /**
@@ -34,7 +89,74 @@ export function CancelConnectionChange() {
  */
 export function DiscoverCapabilities() {
     return $Call.ByName("api-automation/internal/appwails.Service.DiscoverCapabilities").then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType1($result);
+        return $$createType3($result);
+    }));
+}
+
+/**
+ * @returns {$CancellablePromise<$models.ExportResult>}
+ */
+export function ExportResults() {
+    return $Call.ByName("api-automation/internal/appwails.Service.ExportResults").then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType4($result);
+    }));
+}
+
+/**
+ * @returns {$CancellablePromise<$models.AdministrationView>}
+ */
+export function InspectJobs() {
+    return $Call.ByName("api-automation/internal/appwails.Service.InspectJobs").then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType0($result);
+    }));
+}
+
+/**
+ * @returns {$CancellablePromise<$models.PresetSummary[]>}
+ */
+export function ListPresets() {
+    return $Call.ByName("api-automation/internal/appwails.Service.ListPresets").then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType6($result);
+    }));
+}
+
+/**
+ * @param {string} name
+ * @returns {$CancellablePromise<$models.PresetLoadView>}
+ */
+export function LoadPreset(name) {
+    return $Call.ByName("api-automation/internal/appwails.Service.LoadPreset", name).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType7($result);
+    }));
+}
+
+/**
+ * @param {string} jobID
+ * @param {string} action
+ * @returns {$CancellablePromise<$models.JobActionResult>}
+ */
+export function ManageJob(jobID, action) {
+    return $Call.ByName("api-automation/internal/appwails.Service.ManageJob", jobID, action).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType8($result);
+    }));
+}
+
+/**
+ * @returns {$CancellablePromise<$models.WorkspaceMetadata>}
+ */
+export function Metadata() {
+    return $Call.ByName("api-automation/internal/appwails.Service.Metadata").then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType9($result);
+    }));
+}
+
+/**
+ * @param {$models.PlanningInput} input
+ * @returns {$CancellablePromise<$models.PlanView>}
+ */
+export function PreviewPlan(input) {
+    return $Call.ByName("api-automation/internal/appwails.Service.PreviewPlan", input).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType10($result);
     }));
 }
 
@@ -43,6 +165,48 @@ export function DiscoverCapabilities() {
  */
 export function RefreshOverview() {
     return $Call.ByName("api-automation/internal/appwails.Service.RefreshOverview").then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType11($result);
+    }));
+}
+
+/**
+ * @param {$models.FileSelection} selection
+ * @returns {$CancellablePromise<$models.ResolvedFiles>}
+ */
+export function ResolveTestFiles(selection) {
+    return $Call.ByName("api-automation/internal/appwails.Service.ResolveTestFiles", selection).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType12($result);
+    }));
+}
+
+/**
+ * @param {$models.PresetInput} input
+ * @returns {$CancellablePromise<void>}
+ */
+export function SavePreset(input) {
+    return $Call.ByName("api-automation/internal/appwails.Service.SavePreset", input);
+}
+
+/**
+ * @returns {$CancellablePromise<string>}
+ */
+export function SelectTestFile() {
+    return $Call.ByName("api-automation/internal/appwails.Service.SelectTestFile");
+}
+
+/**
+ * @returns {$CancellablePromise<string>}
+ */
+export function SelectTestFolder() {
+    return $Call.ByName("api-automation/internal/appwails.Service.SelectTestFolder");
+}
+
+/**
+ * @param {$models.AutomationInput} input
+ * @returns {$CancellablePromise<$models.AutomationState>}
+ */
+export function StartAutomation(input) {
+    return $Call.ByName("api-automation/internal/appwails.Service.StartAutomation", input).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType2($result);
     }));
 }
@@ -52,7 +216,7 @@ export function RefreshOverview() {
  */
 export function StartConnectionChange() {
     return $Call.ByName("api-automation/internal/appwails.Service.StartConnectionChange").then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType0($result);
+        return $$createType1($result);
     }));
 }
 
@@ -61,7 +225,7 @@ export function StartConnectionChange() {
  */
 export function State() {
     return $Call.ByName("api-automation/internal/appwails.Service.State").then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType3($result);
+        return $$createType13($result);
     }));
 }
 
@@ -71,12 +235,22 @@ export function State() {
  */
 export function TestConnection(input) {
     return $Call.ByName("api-automation/internal/appwails.Service.TestConnection", input).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType0($result);
+        return $$createType1($result);
     }));
 }
 
 // Private type creation functions
-const $$createType0 = $models.ConnectionResult.createFrom;
-const $$createType1 = $models.CapabilityView.createFrom;
-const $$createType2 = $models.Overview.createFrom;
-const $$createType3 = $models.PreviewState.createFrom;
+const $$createType0 = $models.AdministrationView.createFrom;
+const $$createType1 = $models.ConnectionResult.createFrom;
+const $$createType2 = $models.AutomationState.createFrom;
+const $$createType3 = $models.CapabilityView.createFrom;
+const $$createType4 = $models.ExportResult.createFrom;
+const $$createType5 = $models.PresetSummary.createFrom;
+const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = $models.PresetLoadView.createFrom;
+const $$createType8 = $models.JobActionResult.createFrom;
+const $$createType9 = $models.WorkspaceMetadata.createFrom;
+const $$createType10 = $models.PlanView.createFrom;
+const $$createType11 = $models.Overview.createFrom;
+const $$createType12 = $models.ResolvedFiles.createFrom;
+const $$createType13 = $models.PreviewState.createFrom;

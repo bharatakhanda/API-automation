@@ -3,6 +3,8 @@ package appwails
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +14,7 @@ import (
 )
 
 func TestPreviewStateNeverSerializesCredentials(t *testing.T) {
-	service := NewService("embedded-secret-marker")
+	service := NewService("embedded-secret-marker", Options{DataDirectory: t.TempDir(), DisableDiagnostic: true})
 	payload, err := json.Marshal(service.State())
 	if err != nil {
 		t.Fatal(err)
@@ -22,6 +24,23 @@ func TestPreviewStateNeverSerializesCredentials(t *testing.T) {
 		if strings.Contains(strings.ToLower(text), strings.ToLower(forbidden)) {
 			t.Fatalf("safe preview state contains %q: %s", forbidden, text)
 		}
+	}
+}
+
+func TestPreviewDiagnosticsUseInjectedDataIdentityAndClose(t *testing.T) {
+	root := t.TempDir()
+	service := NewService("secret-not-for-log", Options{DataDirectory: root})
+	path := service.State().DiagnosticPath
+	if filepath.Dir(filepath.Dir(path)) != root {
+		t.Fatalf("diagnostic path %q is outside preview data root %q", path, root)
+	}
+	Shutdown(service)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "secret-not-for-log") || !strings.Contains(string(body), "Application exiting") {
+		t.Fatalf("unsafe or incomplete diagnostic: %q", body)
 	}
 }
 
