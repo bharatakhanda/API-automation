@@ -260,13 +260,6 @@ type apiTraceReport struct {
 
 type runMode = application.RunMode
 
-type lifecycleFailure struct {
-	outcome joboutcome.Outcome
-	attrs   map[string]string
-}
-
-func (e *lifecycleFailure) Error() string { return e.outcome.Summary() }
-
 var runModes = application.RunModes()
 
 func New() *Window {
@@ -1456,86 +1449,11 @@ func (w *Window) finishManualJobAction(action, jobID string, err error) {
 }
 
 func activelyProcessingJob(attributes map[string]string) (bool, string) {
-	reported := make([]string, 0, 4)
-	for key, value := range attributes {
-		keyLower := strings.ToLower(strings.TrimSpace(key))
-		value = strings.TrimSpace(value)
-		if strings.HasPrefix(keyLower, "is ") {
-			activeKey := strings.Contains(keyLower, "printing") || strings.Contains(keyLower, "processing") || strings.Contains(keyLower, "ripping")
-			if activeKey && isTruthy(value) {
-				return true, strings.TrimSpace(key) + "=" + value
-			}
-		}
-		stateKey := keyLower == "status" || keyLower == "state" || keyLower == "display status" || strings.Contains(keyLower, "job status") || strings.Contains(keyLower, "current action")
-		if !stateKey || value == "" {
-			continue
-		}
-		reported = append(reported, strings.TrimSpace(key)+"="+value)
-		valueLower := strings.ToLower(value)
-		waitingOrTerminal := false
-		for _, term := range []string{"done", "complete", "cancel", "abort", "error", "fail", "held", "queue", "wait", "ready"} {
-			if strings.Contains(valueLower, term) {
-				waitingOrTerminal = true
-				break
-			}
-		}
-		if waitingOrTerminal {
-			continue
-		}
-		for _, term := range []string{"printing", "processing", "ripping"} {
-			if strings.Contains(valueLower, term) {
-				return true, strings.TrimSpace(key) + "=" + value
-			}
-		}
-	}
-	if len(reported) == 0 {
-		return false, "unknown"
-	}
-	sort.Strings(reported)
-	return false, strings.Join(reported, ", ")
-}
-
-func waitingToPrintJob(attributes map[string]string) (bool, string) {
-	for _, key := range []string{"queued for printing?", "is committed to print?", "waiting to print?", "ready to print?"} {
-		if isTruthy(attributes[key]) {
-			return true, key + "=" + strings.TrimSpace(attributes[key])
-		}
-	}
-	for _, key := range []string{"status", "state", "display status", "current action"} {
-		value := strings.TrimSpace(attributes[key])
-		valueLower := strings.ToLower(value)
-		for _, phrase := range []string{"waiting to print", "ready to print", "queued for print", "print queue"} {
-			if strings.Contains(valueLower, phrase) {
-				return true, key + "=" + value
-			}
-		}
-	}
-	if strings.EqualFold(strings.TrimSpace(attributes["job release state"]), "production") {
-		if active, _ := activelyProcessingJob(attributes); !active && !printCompleted(attributes) {
-			return true, "job release state=production"
-		}
-	}
-	return false, "unknown"
+	return application.ActivelyProcessingJob(attributes)
 }
 
 func cancelableJob(attributes map[string]string) (bool, string) {
-	if active, state := activelyProcessingJob(attributes); active {
-		return true, state
-	}
-	if waiting, state := waitingToPrintJob(attributes); waiting {
-		return true, state
-	}
-	_, state := activelyProcessingJob(attributes)
-	return false, state
-}
-
-func isTruthy(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
+	return application.CancelableJob(attributes)
 }
 
 func (w *Window) captureCapabilities() {
@@ -1850,6 +1768,7 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 		return report
 	}
 	report.SessionLogin = session.LoginPath
+	runClient := newFieryAutomationClient(client, session)
 	imp, err := client.ImportJobToQueue(ctx, session, file, "hold")
 	report.Import = imp
 	report.JobID = imp.JobID
@@ -1861,7 +1780,7 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 		report.Stages = append(report.Stages, apiTraceStage{Name: name, Captured: time.Now().Format(time.RFC3339Nano), Responses: client.GetRawJobResponses(ctx, session, imp.JobID)})
 	}
 	capture("after import")
-	spooled, err := w.waitJobCondition(ctx, client, session, imp.JobID, "done spooling before diagnostic update", 4*time.Minute, time.Second, statusEquals("done spooling"))
+	spooled, err := application.WaitJobCondition(ctx, runClient, imp.JobID, "done spooling before diagnostic update", 4*time.Minute, time.Second, application.StatusEquals("done spooling"))
 	if err != nil {
 		report.Error = err.Error()
 		capture("spooling wait failed")
@@ -1906,11 +1825,11 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 		return report
 	}
 	capture("immediately after update")
-	if err := w.performModeLifecycle(ctx, client, session, imp.JobID, mode); err != nil {
-		var failed *lifecycleFailure
+	if err := application.ExecuteModeLifecycle(ctx, runClient, imp.JobID, mode, application.DefaultPollingPolicy(), func(message string) { w.addLog("%s", message) }); err != nil {
+		var failed *application.LifecycleFailure
 		if errors.As(err, &failed) {
-			report.Final = failed.attrs
-			report.Lifecycle = failed.outcome.Summary()
+			report.Final = failed.Attributes
+			report.Lifecycle = failed.Outcome.Summary()
 			report.Result = "FAIL"
 			capture("lifecycle failed")
 			return report
@@ -1924,7 +1843,13 @@ func (w *Window) runAPITrace(ctx context.Context, server model.ServerConnection,
 	} else {
 		capture("after " + strings.ToLower(mode.Label) + " lifecycle")
 	}
-	final, err := w.readBackAttributes(ctx, client, session, imp.JobID, attrs)
+	final, err := application.ReadBackAttributes(ctx, runClient, imp.JobID, attrs, w.attributeMatcher(), application.DefaultPollingPolicy(), func(actual, expected map[string]string, _ bool, readErr error) {
+		if readErr != nil {
+			w.diagnostic.printf("READBACK: job=%s attempt=error error=%v", imp.JobID, readErr)
+			return
+		}
+		w.logAttributeReadback(imp.JobID, actual, expected)
+	})
 	report.Final = final
 	if err != nil {
 		report.Error = err.Error()
@@ -2089,292 +2014,104 @@ func (w *Window) runAutomation(ctx context.Context, server model.ServerConnectio
 			w.invalidate()
 		}
 	}()
-	client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
-	if err != nil {
-		w.setStatus("Server configuration invalid: " + err.Error())
-		return
-	}
-	session, err := client.Login(ctx)
-	if err != nil {
-		w.setStatus("Login failed: " + err.Error())
-		return
-	}
+
 	w.mu.Lock()
-	w.lastRun.SessionLoginPath = session.LoginPath
+	capabilityModel := w.capabilities
+	store := w.resultStore
 	w.mu.Unlock()
-	jobs := make(chan struct {
-		file  string
-		attrs map[string]string
-		mode  runMode
-	})
-	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for job := range jobs {
-				w.executeJobSafely(ctx, client, session, job.file, job.attrs, job.mode, serverPreset, intent, constraintMode)
-			}
-		}()
-	}
-	for _, f := range selectedFiles {
-		for _, c := range combos {
-			for _, mode := range modes {
-				select {
-				case <-ctx.Done():
-					close(jobs)
-					wg.Wait()
-					finalStatus = "Cancelled"
-					w.setStatus("Cancelling and finalizing automation results...")
-					return
-				case jobs <- struct {
-					file  string
-					attrs map[string]string
-					mode  runMode
-				}{f, combinationToAttributes(c), mode}:
-				}
-			}
-		}
-	}
-	close(jobs)
-	wg.Wait()
-	if ctx.Err() != nil {
-		finalStatus = "Cancelled"
-		w.setStatus("Cancelling and finalizing automation results...")
-		return
-	}
-	finalStatus = "Completed"
-	w.setStatus("Finalizing automation results...")
-}
-
-func (w *Window) executeJobSafely(ctx context.Context, client *fiery.Client, session fiery.Session, file string, attrs map[string]string, mode runMode, serverPreset *fiery.ServerPreset, intent automationTestIntent, constraintMode constraintTestMode) {
-	result := reportxlsx.Result{JobName: filepath.Base(file), Mode: mode.Label, SetValues: cloneStringMap(attrs)}
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			stack := debug.Stack()
-			_ = writeCrashReport(fmt.Sprintf("panic while processing %s in mode %s: %v", filepath.Base(file), mode.Label, recovered), stack)
-			w.diagnostic.printf("PANIC: file=%s mode=%s value=%v stack=%s", filepath.Base(file), mode.Label, recovered, stack)
-			result.Result = "ERROR"
-			result.Detail = fmt.Sprintf("mode=%s: unexpected internal error; see logs/crash.log", mode.Label)
-			w.addResult(result)
-		}
-	}()
-	w.executeJob(ctx, client, session, file, attrs, mode, serverPreset, intent, constraintMode, &result)
-}
-
-func (w *Window) executeJob(ctx context.Context, client *fiery.Client, session fiery.Session, file string, attrs map[string]string, mode runMode, serverPreset *fiery.ServerPreset, intent automationTestIntent, constraintMode constraintTestMode, result *reportxlsx.Result) {
-	start := time.Now()
-	finish := func(status, detail string, got map[string]string) {
-		result.Result = status
-		result.DurationMS = time.Since(start).Milliseconds()
-		if serverPreset != nil {
-			detail += "; server preset=" + serverPresetDescription(serverPreset)
-		}
-		result.Detail = detail
-		result.JobName = jobNameFromAttributes(got, result.JobName)
-		result.GetValues = selectedReadbackValues(got, attrs)
-		result.JobStatus = got["status"]
-		result.JobState = got["state"]
-		result.JobError = firstNonEmpty(got["error"], got["pdl error"])
-		result.LastEvent = got["last joblog event"]
-		w.addResult(*result)
-	}
-
-	imp, err := client.ImportJobToQueue(ctx, session, file, mode.ImportQueue)
-	if err != nil {
-		finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
-		return
-	}
-	result.JobID = imp.JobID
-	w.addLog("Imported %s as job %s into queue %s for mode %s", filepath.Base(file), imp.JobID, mode.ImportQueue, mode.Label)
-	if err := w.confirmImport(ctx, client, session, imp.JobID); err != nil {
-		finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
-		return
-	}
-	// A visible job can still be spooling. Wait for the imported ticket to be
-	// stable before any update or lifecycle decision so Hold-only runs do not
-	// report a premature pass and ticket updates are not overwritten.
-	w.addLog("Waiting for job %s status=done spooling", imp.JobID)
-	spooled, err := w.waitJobCondition(ctx, client, session, imp.JobID, "done spooling after import", 4*time.Minute, time.Second, func(attributes map[string]string) bool {
-		return statusEquals("done spooling")(attributes) || !joboutcome.Evaluate(attributes, joboutcome.Policy{}).Pass
-	})
-	if err != nil {
-		finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), spooled)
-		return
-	}
-	if outcome := joboutcome.Evaluate(spooled, joboutcome.Policy{}); !outcome.Pass {
-		result.Lifecycle = outcome.Summary()
-		finish("FAIL", fmt.Sprintf("mode=%s: job failed while spooling: %s", mode.Label, outcome.Summary()), spooled)
-		return
-	}
-	if err := validateCustomPageRange(attrs, spooled); err != nil {
-		finish("FAIL", fmt.Sprintf("mode=%s: custom page range is invalid for %s: %v", mode.Label, filepath.Base(file), err), spooled)
-		return
-	}
+	var preset *application.ServerPresetSelection
 	if serverPreset != nil {
-		w.addLog("Applying Fiery server preset %s to job %s", serverPresetDescription(serverPreset), imp.JobID)
-		if err := client.ApplyServerPreset(ctx, session, imp.JobID, serverPreset.ID); err != nil {
-			finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), spooled)
-			return
-		}
-		w.addLog("Fiery server preset %s was accepted for job %s", serverPresetDescription(serverPreset), imp.JobID)
+		preset = &application.ServerPresetSelection{ID: serverPreset.ID, Description: serverPresetDescription(serverPreset)}
 	}
-	if intent == testIntentConstraint {
-		status, detail, got := w.executeConstraintCase(ctx, client, session, imp.JobID, attrs, constraintMode, spooled)
-		result.Lifecycle = detail
-		finish(status, detail, got)
-		return
-	}
-	if len(attrs) > 0 {
-		w.mu.Lock()
-		capabilityModel := w.capabilities
-		w.mu.Unlock()
-		if capabilities.NeedsConstraintCheck(capabilityModel, attrs) {
-			constraintCheck, constraintErr := client.CheckJobConstraints(ctx, session, imp.JobID, attrs)
-			if constraintErr != nil {
-				finish("ERROR", fmt.Sprintf("mode=%s: job constraint validation failed: %v", mode.Label, constraintErr), nil)
-				return
-			}
-			if constraintCheck.HasConflicts() {
-				got, _ := client.GetJobAttributes(ctx, session, imp.JobID)
-				result.Lifecycle = "Fiery constraint conflict: " + formatStringMap(constraintCheck.Conflicts)
-				finish("FAIL", fmt.Sprintf("mode=%s: Fiery rejected the selected settings as constrained: %s; solutions=%v", mode.Label, formatStringMap(constraintCheck.Conflicts), constraintCheck.Solutions), got)
-				return
-			}
-			if constraintCheck.Supported {
-				w.addLog("Fiery job constraint check passed for job %s", imp.JobID)
-			} else if constraintCheck.Warning != "" {
-				w.addLog("Fiery job constraint endpoint unavailable for job %s; update response remains authoritative: %s", imp.JobID, short(constraintCheck.Warning, 300))
-			}
-		}
-		w.addLog("Setting job %s attributes after done spooling: %s", imp.JobID, formatAttributes(attrs))
-		w.logCriticalAttributeWire(imp.JobID, attrs)
-		if err := client.UpdateJobAttributes(ctx, session, imp.JobID, attrs); err != nil {
-			finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
-			return
-		}
-		if err := w.confirmAttributeUpdate(ctx, client, session, imp.JobID, attrs, mode); err != nil {
-			finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
-			return
-		}
-	}
-	if modeIncludesAction(mode, "delete") {
-		got, readErr := w.readBackAttributes(ctx, client, session, imp.JobID, attrs)
-		deleteErr := client.DeleteJob(ctx, session, imp.JobID)
-		if deleteErr != nil {
-			finish("ERROR", fmt.Sprintf("mode=%s: delete failed: %v", mode.Label, deleteErr), got)
-			return
-		}
-		w.addLog("Deleted job %s successfully for Delete mode", imp.JobID)
-		if readErr != nil {
-			finish("ERROR", fmt.Sprintf("mode=%s: job deleted, but pre-delete readback failed: %v", mode.Label, readErr), got)
-			return
-		}
-		for key, want := range attrs {
-			if !w.expectedAttributeMatches(got, attrs, key, want) {
-				finish("FAIL", fmt.Sprintf("mode=%s: job deleted, but pre-delete verification failed for %s set=%q got=%q", mode.Label, key, want, got[key]), got)
-				return
-			}
-		}
-		finish("PASS", fmt.Sprintf("mode=%s: job was deleted successfully using its dedicated test job", mode.Label), got)
-		return
-	}
-	if err := w.performModeLifecycle(ctx, client, session, imp.JobID, mode); err != nil {
-		var failed *lifecycleFailure
-		if errors.As(err, &failed) {
-			result.Lifecycle = failed.outcome.Summary()
-			finish("FAIL", fmt.Sprintf("mode=%s: lifecycle verification failed: %s", mode.Label, failed.outcome.Summary()), failed.attrs)
-		} else {
-			finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), nil)
-		}
-		return
-	}
-	got, err := w.readBackAttributes(ctx, client, session, imp.JobID, attrs)
-	if err != nil {
-		finish("ERROR", fmt.Sprintf("mode=%s: %v", mode.Label, err), got)
-		return
-	}
-	outcome := joboutcome.Evaluate(got, lifecyclePolicy(mode))
-	result.Lifecycle = outcome.Summary()
-	if !outcome.Pass {
-		finish("FAIL", fmt.Sprintf("mode=%s: lifecycle verification failed: %s", mode.Label, outcome.Summary()), got)
-		return
-	}
-	status := "PASS"
-	detail := fmt.Sprintf("mode=%s: lifecycle passed (%s); set values matched get values", mode.Label, outcome.Summary())
-	if len(attrs) == 0 {
-		detail = fmt.Sprintf("mode=%s: lifecycle passed (%s); no job attributes were selected for set/get verification", mode.Label, outcome.Summary())
-	}
-	for k, v := range attrs {
-		if !w.expectedAttributeMatches(got, attrs, k, v) {
-			status = "FAIL"
-			detail = fmt.Sprintf("mode=%s: %s set=%q got=%q status=%q state=%q display=%q recent=%q related=%s availableKeys=%s", mode.Label, k, v, got[k], got["status"], got["state"], got["display status"], got["recent action"], relatedReadbackValues(got), short(strings.Join(sortedKeys(got), ","), 220))
-			if requiresRipReadback(k) && !modeIncludesAction(mode, "rip") {
-				detail += "; note=this attribute may require RIP for strict verification"
-			}
-			w.logRawPostmanComparison(ctx, client, session, imp.JobID)
-			break
-		}
-	}
-	finish(status, detail, got)
-}
-
-func (w *Window) confirmImport(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string) error {
-	w.addLog("Confirming job %s is visible after import", jobID)
-	_, err := w.waitJobCondition(ctx, client, session, jobID, "job visible after import", 2*time.Minute, 1*time.Second, func(attrs map[string]string) bool {
-		return strings.TrimSpace(attrs["id"]) == jobID || strings.TrimSpace(attrs["status"]) != "" || strings.TrimSpace(attrs["state"]) != ""
+	runner := application.NewRunner(fieryAutomationConnector{server: server}, store)
+	operation := runner.Start(ctx, application.RunRequest{
+		Files:          selectedFiles,
+		Combinations:   combos,
+		Modes:          modes,
+		Workers:        workers,
+		Capabilities:   capabilityModel,
+		ServerPreset:   preset,
+		TestIntent:     intent,
+		ConstraintMode: constraintMode,
 	})
-	return err
+	for event := range operation.Events {
+		w.handleRunEvent(event)
+	}
+	terminal := <-operation.Done
+	finalStatus = string(terminal.Status)
+	if terminal.StorageError != "" {
+		w.mu.Lock()
+		if w.resultStoreError == "" {
+			w.resultStoreError = terminal.StorageError
+		}
+		w.mu.Unlock()
+	}
+	switch terminal.Status {
+	case application.RunStatusCompleted:
+		w.setStatus("Finalizing automation results...")
+	case application.RunStatusCancelled:
+		w.setStatus("Cancelling and finalizing automation results...")
+	case application.RunStatusFailed:
+		if terminal.Error != "" {
+			w.setStatus(capitalizeStatus(terminal.Error))
+		}
+	}
 }
 
-func (w *Window) confirmAttributeUpdate(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, expected map[string]string, mode runMode) error {
-	if len(expected) == 0 {
-		return nil
-	}
-	// Attribute POST success means the server accepted the update request. Some
-	// Fiery attributes are not readable immediately, so do not fail the run here;
-	// final strict set/get verification runs after the selected lifecycle actions
-	// complete.
-	if modeIncludesAction(mode, "rip") {
-		w.addLog("Attribute update accepted for job %s; final set/get verification will run after RIP", jobID)
-	} else {
-		w.addLog("Attribute update accepted for job %s; final set/get verification will run after mode %s", jobID, mode.Label)
-	}
-	return nil
-}
-
-func (w *Window) readBackAttributes(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, expected map[string]string) (map[string]string, error) {
-	if len(expected) == 0 {
-		return client.GetJobAttributes(ctx, session, jobID)
-	}
-	deadline := time.NewTimer(20 * time.Second)
-	defer deadline.Stop()
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	var got map[string]string
-	var err error
-	for {
-		gotAttempt, getErr := client.GetJobAttributes(ctx, session, jobID)
-		err = getErr
-		if getErr != nil {
-			w.diagnostic.printf("READBACK: job=%s attempt=error error=%v", jobID, getErr)
+func (w *Window) handleRunEvent(event application.RunEvent) {
+	switch event.Kind {
+	case application.RunEventStarted:
+		if event.Started != nil {
+			w.mu.Lock()
+			w.lastRun.SessionLoginPath = event.Started.SessionLoginPath
+			w.mu.Unlock()
+		}
+	case application.RunEventLog:
+		if event.Log != nil {
+			w.addLog("%s", event.Log.Message)
+		}
+	case application.RunEventAttributeWrite:
+		if event.AttributeWrite != nil {
+			w.logCriticalAttributeWire(event.AttributeWrite.JobID, event.AttributeWrite.Attributes)
+		}
+	case application.RunEventReadback:
+		if event.Readback == nil {
+			return
+		}
+		if event.Readback.Error != "" {
+			w.diagnostic.printf("READBACK: job=%s attempt=error error=%s", event.Readback.JobID, event.Readback.Error)
 		} else {
-			got = gotAttempt
-			w.logAttributeReadback(jobID, got, expected)
-			if w.attributesMatch(got, expected) {
-				return got, nil
-			}
+			w.logAttributeReadback(event.Readback.JobID, event.Readback.Actual, event.Readback.Expected)
 		}
-		select {
-		case <-ctx.Done():
-			return got, ctx.Err()
-		case <-deadline.C:
-			if got == nil && err != nil {
-				return nil, fmt.Errorf("read back job %s attributes: %w", jobID, err)
-			}
-			return got, nil
-		case <-ticker.C:
+	case application.RunEventRawComparison:
+		if event.RawComparison == nil {
+			return
 		}
+		w.mu.Lock()
+		loginPath := w.lastRun.SessionLoginPath
+		w.mu.Unlock()
+		for _, response := range event.RawComparison.Responses {
+			w.diagnostic.printf("POSTMAN_COMPARE: method=%s endpoint=%s proto=%s status=%d accept=*/* login=%s body=%s", response.Method, response.Endpoint, response.ResponseProto, response.StatusCode, loginPath, response.Body)
+		}
+	case application.RunEventPanic:
+		if event.Panic != nil {
+			_ = writeCrashReport(fmt.Sprintf("panic while processing %s in mode %s: %s", event.Panic.File, event.Panic.Mode, event.Panic.Value), []byte(event.Panic.Stack))
+			w.diagnostic.printf("PANIC: file=%s mode=%s value=%s stack=%s", event.Panic.File, event.Panic.Mode, event.Panic.Value, event.Panic.Stack)
+		}
+	case application.RunEventResult:
+		if event.Result != nil {
+			if event.Result.StorageError != "" {
+				w.mu.Lock()
+				if w.resultStoreError == "" {
+					w.resultStoreError = event.Result.StorageError
+				}
+				w.mu.Unlock()
+				w.diagnostic.printf("RESULT_STORE: append error job=%s error=%s", event.Result.Result.JobID, event.Result.StorageError)
+			}
+			w.addResult(event.Result.Result)
+		}
+	case application.RunEventProgress:
+		w.invalidate()
 	}
 }
 
@@ -2410,12 +2147,6 @@ func (w *Window) logAttributeReadback(jobID string, got, expected map[string]str
 	w.diagnostic.printf("READBACK: %s", string(encoded))
 }
 
-func (w *Window) logRawPostmanComparison(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string) {
-	for _, response := range client.GetRawJobResponses(ctx, session, jobID) {
-		w.diagnostic.printf("POSTMAN_COMPARE: method=%s endpoint=%s proto=%s status=%d accept=*/* login=%s body=%s", response.Method, response.Endpoint, response.ResponseProto, response.StatusCode, session.LoginPath, response.Body)
-	}
-}
-
 func validateCustomPageRange(attributes, jobAttributes map[string]string) error {
 	return application.ValidateCustomPageRange(attributes, jobAttributes)
 }
@@ -2443,193 +2174,8 @@ func (w *Window) attributeValueMatches(key, got, want string) bool {
 	return w.attributeMatcher().AttributeValueMatches(key, got, want)
 }
 
-func (w *Window) performModeLifecycle(ctx context.Context, client *fiery.Client, session fiery.Session, jobID string, mode runMode) error {
-	for _, action := range mode.Actions {
-		switch action {
-		case "rip":
-			// executeJob and the API-trace workflow both stabilize the imported
-			// ticket at done spooling before entering lifecycle actions. Avoid a
-			// second six-endpoint readback here, especially at high concurrency.
-			w.addLog("Running RIP for job %s", jobID)
-			if err := client.JobAction(ctx, session, jobID, "rip"); err != nil {
-				return err
-			}
-			w.addLog("Waiting for job %s status=done ripping or a terminal Fiery failure after RIP", jobID)
-			observed, err := w.waitJobCondition(ctx, client, session, jobID, "RIP completion", 6*time.Minute, 2*time.Second, func(attributes map[string]string) bool {
-				if statusEquals("done ripping")(attributes) {
-					return true
-				}
-				return !joboutcome.Evaluate(attributes, joboutcome.Policy{}).Pass
-			})
-			if err != nil {
-				return err
-			}
-			if outcome := joboutcome.Evaluate(observed, joboutcome.Policy{}); !outcome.Pass {
-				return &lifecycleFailure{outcome: outcome, attrs: observed}
-			}
-		case "production":
-			// Production always follows a successful RIP in the declared modes.
-			// Reuse that lifecycle guarantee rather than polling done ripping twice.
-			w.addLog("Moving job %s to production release state", jobID)
-			if err := client.UpdateJobAttributes(ctx, session, jobID, map[string]string{"job release state": "production"}); err != nil {
-				return err
-			}
-			w.addLog("Waiting for job %s job release state=production", jobID)
-			if _, err := w.waitJobCondition(ctx, client, session, jobID, "production release state", 2*time.Minute, 2*time.Second, attrEquals("job release state", "production")); err != nil {
-				return err
-			}
-		case "press_print":
-			w.addLog("Running press_print for job %s", jobID)
-			if err := client.JobAction(ctx, session, jobID, "press_print"); err != nil {
-				return err
-			}
-			w.addLog("Confirming press_print accepted for job %s", jobID)
-			if _, err := w.waitJobCondition(ctx, client, session, jobID, "press_print accepted", 2*time.Minute, 2*time.Second, pressPrintAccepted); err != nil {
-				return err
-			}
-		case "print":
-			w.addLog("Running print for job %s", jobID)
-			if err := client.JobAction(ctx, session, jobID, "print"); err != nil {
-				return err
-			}
-			w.addLog("Waiting for job %s print completion", jobID)
-			if _, err := w.waitJobCondition(ctx, client, session, jobID, "print completion", 10*time.Minute, 3*time.Second, printCompleted); err != nil {
-				return err
-			}
-		case "cancel_ripping":
-			w.addLog("Starting RIP for dedicated cancel test job %s after stable spooling", jobID)
-			if err := client.JobAction(ctx, session, jobID, "rip"); err != nil {
-				return err
-			}
-			if err := w.cancelDedicatedJob(ctx, client, session, jobID, "processing/ripping", 3*time.Minute, func(attributes map[string]string) bool {
-				active, state := activelyProcessingJob(attributes)
-				return active && !strings.Contains(strings.ToLower(state), "printing")
-			}); err != nil {
-				return err
-			}
-		case "cancel_waiting":
-			if err := w.cancelDedicatedJob(ctx, client, session, jobID, "waiting to print", 2*time.Minute, func(attributes map[string]string) bool {
-				waiting, _ := waitingToPrintJob(attributes)
-				return waiting
-			}); err != nil {
-				return err
-			}
-		case "cancel_printing":
-			w.addLog("Starting print for dedicated cancel test job %s", jobID)
-			if err := client.JobAction(ctx, session, jobID, "print"); err != nil {
-				return err
-			}
-			if err := w.cancelDedicatedJob(ctx, client, session, jobID, "printing", 3*time.Minute, printingJob); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (w *Window) cancelDedicatedJob(ctx context.Context, client *fiery.Client, session fiery.Session, jobID, scenario string, timeout time.Duration, ready func(map[string]string) bool) error {
-	w.addLog("Waiting for job %s cancellation scenario=%s", jobID, scenario)
-	if _, err := w.waitJobCondition(ctx, client, session, jobID, scenario+" before cancel", timeout, 250*time.Millisecond, ready); err != nil {
-		return fmt.Errorf("cancel was not sent because the job never reached %s: %w", scenario, err)
-	}
-	w.addLog("Cancelling job %s in scenario=%s", jobID, scenario)
-	if err := client.CancelJob(ctx, session, jobID); err != nil {
-		return err
-	}
-	if _, err := w.waitJobCondition(ctx, client, session, jobID, "cancel acknowledgement", 2*time.Minute, 500*time.Millisecond, cancelObserved); err != nil {
-		return err
-	}
-	w.addLog("Cancel acknowledged for job %s in scenario=%s", jobID, scenario)
-	return nil
-}
-
-func printingJob(attributes map[string]string) bool {
-	if isTruthy(attributes["is printing?"]) {
-		return true
-	}
-	for _, key := range []string{"status", "state", "display status", "current action"} {
-		value := strings.ToLower(strings.TrimSpace(attributes[key]))
-		if strings.Contains(value, "printing") && !strings.Contains(value, "done") && !strings.Contains(value, "complete") {
-			return true
-		}
-	}
-	return false
-}
-
-func (w *Window) waitJobCondition(ctx context.Context, client *fiery.Client, session fiery.Session, jobID, description string, timeout, interval time.Duration, match func(map[string]string) bool) (map[string]string, error) {
-	if timeout <= 0 {
-		timeout = 2 * time.Minute
-	}
-	if interval <= 0 {
-		interval = time.Second
-	}
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	var last map[string]string
-	var lastErr error
-	for {
-		attrs, err := client.GetJobAttributes(ctx, session, jobID)
-		if err == nil {
-			last = attrs
-			if match(attrs) {
-				return attrs, nil
-			}
-		} else {
-			lastErr = err
-		}
-		select {
-		case <-ctx.Done():
-			return last, ctx.Err()
-		case <-deadline.C:
-			if lastErr != nil {
-				return last, fmt.Errorf("wait for job %s %s timed out after %s; last GET error: %w", jobID, description, timeout, lastErr)
-			}
-			return last, fmt.Errorf("wait for job %s %s timed out after %s; last status=%q state=%q release=%q recent=%q keys=%s", jobID, description, timeout, last["status"], last["state"], last["job release state"], last["recent action"], short(strings.Join(sortedKeys(last), ","), 220))
-		case <-ticker.C:
-		}
-	}
-}
-
-func statusEquals(want string) func(map[string]string) bool {
-	return func(attrs map[string]string) bool { return strings.EqualFold(strings.TrimSpace(attrs["status"]), want) }
-}
-
-func attrEquals(key, want string) func(map[string]string) bool {
-	return func(attrs map[string]string) bool { return strings.EqualFold(strings.TrimSpace(attrs[key]), want) }
-}
-
-func pressPrintAccepted(attrs map[string]string) bool {
-	if strings.EqualFold(attrs["queued for printing?"], "yes") || strings.EqualFold(attrs["is committed to print?"], "yes") || strings.EqualFold(attrs["is printing?"], "yes") {
-		return true
-	}
-	status := strings.ToLower(strings.TrimSpace(attrs["status"]))
-	recent := strings.ToLower(strings.TrimSpace(attrs["recent action"]))
-	return strings.Contains(status, "print") || strings.Contains(recent, "press_print") || strings.Contains(recent, "press print")
-}
-
-func printCompleted(attrs map[string]string) bool {
-	if strings.EqualFold(attrs["has been printed?"], "yes") || strings.EqualFold(attrs["status"], "done printing") || strings.EqualFold(attrs["display status"], "done printing") {
-		return true
-	}
-	status := strings.ToLower(strings.TrimSpace(attrs["status"]))
-	return strings.Contains(status, "done print") || strings.Contains(status, "printed")
-}
-
-func cancelObserved(attrs map[string]string) bool {
-	for _, key := range []string{"status", "state", "display status", "recent action", "current action"} {
-		value := strings.ToLower(strings.TrimSpace(attrs[key]))
-		if strings.Contains(value, "cancel") || strings.Contains(value, "abort") {
-			return true
-		}
-	}
-	cancelable, state := cancelableJob(attrs)
-	if cancelable || state == "unknown" {
-		return false
-	}
-	state = strings.ToLower(state)
-	return !strings.Contains(state, "done print") && !strings.Contains(state, "complete") && !strings.Contains(state, "printed")
+func cancelObserved(attributes map[string]string) bool {
+	return application.CancelObserved(attributes)
 }
 
 func lifecyclePolicy(mode runMode) joboutcome.Policy {
@@ -2638,23 +2184,6 @@ func lifecyclePolicy(mode runMode) joboutcome.Policy {
 
 func modeIncludesAction(mode runMode, want string) bool {
 	return application.ModeIncludesAction(mode, want)
-}
-
-func requiresRipReadback(key string) bool {
-	return application.RequiresRIPReadback(key)
-}
-
-func relatedReadbackValues(attrs map[string]string) string {
-	related := relatedReadbackMap(attrs)
-	if len(related) == 0 {
-		return "none"
-	}
-	keys := sortedKeys(related)
-	parts := make([]string, 0, len(keys))
-	for _, key := range keys {
-		parts = append(parts, fmt.Sprintf("%s=%q", key, related[key]))
-	}
-	return strings.Join(parts, ", ")
 }
 
 func relatedReadbackMap(attrs map[string]string) map[string]string {
@@ -2760,13 +2289,11 @@ func (w *Window) logSelectedCombinations(combos []combinations.Combination, axes
 	}
 	w.addLog("Selected %d combination(s) for strategy=%s; axes: %s", len(combos), w.strategy, strings.Join(selected, "; "))
 }
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
+func capitalizeStatus(value string) string {
+	if value == "" {
+		return ""
 	}
-	return ""
+	return strings.ToUpper(value[:1]) + value[1:]
 }
 
 func formatStringMap(values map[string]string) string { return formatAttributes(values) }
@@ -3005,18 +2532,9 @@ func (w *Window) addResult(result reportxlsx.Result) {
 	if len(w.results) > maxRetainedResults+retainedEntryTrimBatch {
 		w.results = append([]resultRow(nil), w.results[len(w.results)-maxRetainedResults:]...)
 	}
-	store := w.resultStore
 	w.mu.Unlock()
-	if store == nil {
-		w.diagnostic.printf("RESULT_STORE: result was not persisted because the store is unavailable job=%s", result.JobID)
-	} else if err := store.Append(result); err != nil {
-		w.mu.Lock()
-		if w.resultStoreError == "" {
-			w.resultStoreError = err.Error()
-		}
-		w.mu.Unlock()
-		w.diagnostic.printf("RESULT_STORE: append error job=%s error=%v", result.JobID, err)
-	}
+	// The platform-neutral runner persists the complete result before emitting
+	// this event. Gio retains only bounded presentation rows and counters.
 	w.addLog("%s %s %s", result.JobName, result.Result, result.Detail)
 }
 

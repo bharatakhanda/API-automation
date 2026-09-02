@@ -165,6 +165,8 @@ Deliverables:
 
 Exit gate: lifecycle and result parity tests pass; cancellation/race tests pass; GUI remains field-usable.
 
+Status (2026-09-02): complete on `refactor/platform-neutral-core`. `application.Runner` now owns bounded worker scheduling, authenticated-client ports, import stabilization, server-preset application, constraint validation/disposable cleanup, attribute updates, lifecycle actions, strict readback, per-job panic recovery, cancellation, result recording, and terminal state. A discriminated typed event stream carries started/log/progress/result/readback/diagnostic/panic/terminal payloads through a non-blocking critical-event queue; result and terminal events are never coalesced or dropped. Gio binds `fiery.Client` once per session, consumes runner events, and keeps only presentation state. Deterministic fake-client tests cover success, RIP evidence, lifecycle failure, constraint cleanup, cancellation, recovery, storage failure, worker bounds, and result/event parity. The full audit, race tests, Darwin ARM64 compilation, secret-safe GUI build, and GUI smoke test pass.
+
 ### Stage 3 — Extract connection, monitoring, presets, and administration
 
 Deliverables:
