@@ -5,15 +5,15 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>API Automation Preview</string>
+    <string>API Automation</string>
     <key>CFBundleExecutable</key>
-    <string>api-automation-wails-preview</string>
+    <string>api-automation</string>
     <key>CFBundleIdentifier</key>
-    <string>com.fiery.api-automation.preview</string>
+    <string>com.fiery.api-automation</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>API Automation Preview</string>
+    <string>API Automation</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

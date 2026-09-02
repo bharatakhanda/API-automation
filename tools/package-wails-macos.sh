@@ -6,11 +6,11 @@ version="${1:-0.1.0}"
 bundle_version="${2:-1}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 dist="$root/dist"
-arm64_binary="$dist/api-automation-wails-preview-arm64"
-amd64_binary="$dist/api-automation-wails-preview-amd64"
-app="$dist/API Automation Preview.app"
-executable="$app/Contents/MacOS/api-automation-wails-preview"
-archive="$dist/api-automation-wails-preview-macos-universal.zip"
+arm64_binary="$dist/api-automation-arm64"
+amd64_binary="$dist/api-automation-amd64"
+app="$dist/API Automation.app"
+executable="$app/Contents/MacOS/api-automation"
+archive="$dist/api-automation-macos-universal.zip"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "macOS packaging must run natively on macOS" >&2

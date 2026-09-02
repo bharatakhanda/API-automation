@@ -63,7 +63,7 @@ func (service *Service) ControlServer(ctx context.Context, action string) (Admin
 	switch action {
 	case "restart":
 		title = "Restart Fiery process"
-		message = fmt.Sprintf("Restart Fiery software on %s?\n\nActive Fiery processing may be interrupted. The preview will monitor API recovery.", server.IPAddress)
+		message = fmt.Sprintf("Restart Fiery software on %s?\n\nActive Fiery processing may be interrupted. The application will monitor API recovery.", server.IPAddress)
 	case "reboot":
 		title = "Reboot Fiery server"
 		message = fmt.Sprintf("Reboot the complete Fiery server %s?\n\nAll server services will become unavailable. This is supported only by applicable Fiery platforms.", server.IPAddress)

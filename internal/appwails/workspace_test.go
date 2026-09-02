@@ -42,7 +42,7 @@ func TestPreviewPlanReturnsDirectPageRangeWireValue(t *testing.T) {
 		t.Fatalf("unexpected plan: %#v", view)
 	}
 	if _, present := view.Combinations[0][core.PageRangeLegacyDataID]; present {
-		t.Fatal("legacy page-range companion leaked into preview")
+		t.Fatal("legacy page-range companion leaked into plan preview")
 	}
 }
 
@@ -60,7 +60,7 @@ func TestPreviewPlanPreservesOutputProfileWireIdentity(t *testing.T) {
 	}
 }
 
-func TestPreviewPresetRoundTripUsesDistinctInjectedStore(t *testing.T) {
+func TestPresetRoundTripUsesInjectedStore(t *testing.T) {
 	service := NewService("", Options{DataDirectory: t.TempDir(), DisableDiagnostic: true})
 	model := capabilities.Model{ServerName: "Fiery", SerialNumber: "serial", Options: []capabilities.Option{{ID: "Duplex", Label: "Duplex", Values: []string{"Off", "On"}, Enabled: true}}}
 	service.capabilities = &model

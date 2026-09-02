@@ -14,7 +14,7 @@ import (
 	"api-automation/internal/preflight"
 )
 
-func TestPreviewStateNeverSerializesCredentials(t *testing.T) {
+func TestApplicationStateNeverSerializesCredentials(t *testing.T) {
 	service := NewService("embedded-secret-marker", Options{DataDirectory: t.TempDir(), DisableDiagnostic: true})
 	payload, err := json.Marshal(service.State())
 	if err != nil {
@@ -23,17 +23,17 @@ func TestPreviewStateNeverSerializesCredentials(t *testing.T) {
 	text := string(payload)
 	for _, forbidden := range []string{"embedded-secret-marker", `"secretKey":`, `"password":`, `"cookie":`} {
 		if strings.Contains(strings.ToLower(text), strings.ToLower(forbidden)) {
-			t.Fatalf("safe preview state contains %q: %s", forbidden, text)
+			t.Fatalf("safe application state contains %q: %s", forbidden, text)
 		}
 	}
 }
 
-func TestPreviewDiagnosticsUseInjectedDataIdentityAndClose(t *testing.T) {
+func TestDiagnosticsUseInjectedDataIdentityAndClose(t *testing.T) {
 	root := t.TempDir()
 	service := NewService("secret-not-for-log", Options{DataDirectory: root})
 	path := service.State().DiagnosticPath
 	if filepath.Dir(filepath.Dir(path)) != root {
-		t.Fatalf("diagnostic path %q is outside preview data root %q", path, root)
+		t.Fatalf("diagnostic path %q is outside application data root %q", path, root)
 	}
 	Shutdown(service)
 	body, err := os.ReadFile(path)
@@ -45,7 +45,18 @@ func TestPreviewDiagnosticsUseInjectedDataIdentityAndClose(t *testing.T) {
 	}
 }
 
-func TestPreviewDiagnosticsAndCapturesUseInjectedDebugDirectory(t *testing.T) {
+func TestDiagnosticLogsUseUniqueFiles(t *testing.T) {
+	root := t.TempDir()
+	first := newDiagnosticLog(root)
+	second := newDiagnosticLog(root)
+	defer first.Close()
+	defer second.Close()
+	if first.Path() == "" || second.Path() == "" || first.Path() == second.Path() {
+		t.Fatalf("diagnostic paths must be non-empty and unique: %q %q", first.Path(), second.Path())
+	}
+}
+
+func TestDiagnosticsAndCapturesUseInjectedDebugDirectory(t *testing.T) {
 	dataRoot := t.TempDir()
 	debugRoot := t.TempDir()
 	service := NewService("secret-not-for-log", Options{DataDirectory: dataRoot, DebugDirectory: debugRoot})

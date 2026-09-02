@@ -10,34 +10,34 @@ import (
 )
 
 func TestCompareIgnoresCompletionOrderJobIDAndDuration(t *testing.T) {
-	first := reportxlsx.Result{JobID: "gio-1", JobName: "sample.pdf", Result: "PASS", Mode: "Print", DurationMS: 100, SetValues: map[string]string{"EFPageRange": "5-10"}, GetValues: map[string]string{"EFPageRange": "5-10"}}
-	second := reportxlsx.Result{JobID: "gio-2", JobName: "sample.pdf", Result: "PASS", Mode: "Hold", DurationMS: 200, Lifecycle: "held"}
-	gioPath := writeResults(t, "gio.jsonl", first, second)
-	first.JobID, first.DurationMS = "wails-9", 999
-	second.JobID, second.DurationMS = "wails-8", 888
-	wailsPath := writeResults(t, "wails.jsonl", second, first)
+	first := reportxlsx.Result{JobID: "baseline-1", JobName: "sample.pdf", Result: "PASS", Mode: "Print", DurationMS: 100, SetValues: map[string]string{"EFPageRange": "5-10"}, GetValues: map[string]string{"EFPageRange": "5-10"}}
+	second := reportxlsx.Result{JobID: "baseline-2", JobName: "sample.pdf", Result: "PASS", Mode: "Hold", DurationMS: 200, Lifecycle: "held"}
+	baselinePath := writeResults(t, "baseline.jsonl", first, second)
+	first.JobID, first.DurationMS = "candidate-9", 999
+	second.JobID, second.DurationMS = "candidate-8", 888
+	candidatePath := writeResults(t, "candidate.jsonl", second, first)
 
-	report, err := Compare(gioPath, wailsPath)
+	report, err := Compare(baselinePath, candidatePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !report.Equivalent || report.Gio.Records != 2 || report.Wails.Records != 2 {
+	if !report.Equivalent || report.Baseline.Records != 2 || report.Candidate.Records != 2 {
 		t.Fatalf("unexpected report: %+v", report)
 	}
 }
 
 func TestCompareReportsSemanticDifference(t *testing.T) {
-	gioPath := writeResults(t, "gio.jsonl", reportxlsx.Result{JobName: "sample.pdf", Result: "PASS", Mode: "Hold", JobStatus: "held"})
-	wailsPath := writeResults(t, "wails.jsonl", reportxlsx.Result{JobName: "sample.pdf", Result: "FAIL", Mode: "Hold", JobStatus: "error"})
+	baselinePath := writeResults(t, "baseline.jsonl", reportxlsx.Result{JobName: "sample.pdf", Result: "PASS", Mode: "Hold", JobStatus: "held"})
+	candidatePath := writeResults(t, "candidate.jsonl", reportxlsx.Result{JobName: "sample.pdf", Result: "FAIL", Mode: "Hold", JobStatus: "error"})
 
-	report, err := Compare(gioPath, wailsPath)
+	report, err := Compare(baselinePath, candidatePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Equivalent || len(report.OnlyGio) != 1 || len(report.OnlyWails) != 1 {
+	if report.Equivalent || len(report.OnlyBaseline) != 1 || len(report.OnlyCandidate) != 1 {
 		t.Fatalf("difference was not reported: %+v", report)
 	}
-	if report.OnlyGio[0].Sample.JobID != "" || report.OnlyGio[0].Sample.DurationMS != 0 {
+	if report.OnlyBaseline[0].Sample.JobID != "" || report.OnlyBaseline[0].Sample.DurationMS != 0 {
 		t.Fatal("volatile fields leaked into difference sample")
 	}
 }
@@ -47,22 +47,22 @@ func TestCompareBoundsDifferenceSamples(t *testing.T) {
 	for index := range results {
 		results[index] = reportxlsx.Result{JobName: "sample.pdf", Result: "PASS", Detail: string(rune(index + 1))}
 	}
-	report, err := Compare(writeResults(t, "gio.jsonl", results...), writeResults(t, "wails.jsonl"))
+	report, err := Compare(writeResults(t, "baseline.jsonl", results...), writeResults(t, "candidate.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.OnlyGioRecords != maxDifferenceSamples+1 || len(report.OnlyGio) != maxDifferenceSamples {
-		t.Fatalf("unexpected bounded differences: records=%d samples=%d", report.OnlyGioRecords, len(report.OnlyGio))
+	if report.OnlyBaselineRecords != maxDifferenceSamples+1 || len(report.OnlyBaseline) != maxDifferenceSamples {
+		t.Fatalf("unexpected bounded differences: records=%d samples=%d", report.OnlyBaselineRecords, len(report.OnlyBaseline))
 	}
 }
 
 func TestCompareRejectsMalformedStore(t *testing.T) {
-	gioPath := filepath.Join(t.TempDir(), "broken.jsonl")
-	if err := os.WriteFile(gioPath, []byte("{not-json}\n"), 0o600); err != nil {
+	baselinePath := filepath.Join(t.TempDir(), "broken.jsonl")
+	if err := os.WriteFile(baselinePath, []byte("{not-json}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	wailsPath := writeResults(t, "wails.jsonl")
-	if _, err := Compare(gioPath, wailsPath); err == nil {
+	candidatePath := writeResults(t, "candidate.jsonl")
+	if _, err := Compare(baselinePath, candidatePath); err == nil {
 		t.Fatal("expected malformed store error")
 	}
 }

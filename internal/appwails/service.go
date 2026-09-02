@@ -18,7 +18,7 @@ import (
 	"api-automation/internal/presets"
 )
 
-const previewVersion = "Wails 3 beta preview"
+const applicationVersion = "Wails 3"
 
 type ConnectionDraft struct {
 	IPAddress string `json:"ipAddress"`
@@ -26,7 +26,7 @@ type ConnectionDraft struct {
 	Password  string `json:"password"`
 }
 
-type PreviewState struct {
+type ApplicationState struct {
 	Version        string                  `json:"version"`
 	Connection     core.ConnectionSnapshot `json:"connection"`
 	Capabilities   *CapabilityView         `json:"capabilities,omitempty"`
@@ -122,7 +122,7 @@ func NewService(defaultSecret string, options Options) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 	dataDirectory := strings.TrimSpace(options.DataDirectory)
 	if dataDirectory == "" {
-		dataDirectory, _ = previewDataDirectory()
+		dataDirectory, _ = applicationDataDirectory()
 	}
 	debugDirectory := strings.TrimSpace(options.DebugDirectory)
 	if debugDirectory == "" {
@@ -141,7 +141,7 @@ func NewService(defaultSecret string, options Options) *Service {
 		administration: new(core.AdministrationState), dialogs: options.Dialogs, eventEmitter: options.EventEmitter,
 		diagnostic: diagnostic, dataDirectory: dataDirectory, captureDirectory: captureDirectory,
 	}
-	service.diagnostic.Printf("APPLICATION_START frontend=wails version=%q", previewVersion)
+	service.diagnostic.Printf("APPLICATION_START frontend=wails version=%q", applicationVersion)
 	return service
 }
 
@@ -166,11 +166,11 @@ func Shutdown(service *Service) {
 	service.diagnostic.Close()
 }
 
-func (service *Service) State() PreviewState {
+func (service *Service) State() ApplicationState {
 	service.mu.RLock()
 	view := cloneCapabilityView(service.capability)
 	service.mu.RUnlock()
-	return PreviewState{Version: previewVersion, Connection: service.connection.Snapshot(), Capabilities: view, DiagnosticPath: service.diagnostic.Path()}
+	return ApplicationState{Version: applicationVersion, Connection: service.connection.Snapshot(), Capabilities: view, DiagnosticPath: service.diagnostic.Path()}
 }
 
 func (service *Service) TestConnection(ctx context.Context, input ConnectionDraft) (ConnectionResult, error) {
@@ -196,7 +196,7 @@ func (service *Service) TestConnection(ctx context.Context, input ConnectionDraf
 		service.diagnostic.Printf("CONNECTION_TEST server=%s result=ERROR error=%v", draft.IPAddress, safeErr)
 		return service.connectionResult("Authentication failed"), safeErr
 	}
-	service.connection.CompleteTest(draft, true, "Connection OK · apply to unlock preview")
+	service.connection.CompleteTest(draft, true, "Connection OK · apply to unlock workspace")
 	service.mu.Lock()
 	service.client = client
 	service.session = session
@@ -320,7 +320,7 @@ func (service *Service) DiscoverCapabilities(ctx context.Context) (CapabilityVie
 
 func (service *Service) saveCapabilityEvidence(client *fiery.Client, snapshot fiery.CapabilitySnapshot, model capabilities.Model, environment preflight.EnvironmentSnapshot) (paths, warnings []string) {
 	if service.captureDirectory == "" {
-		return nil, []string{"preview capture directory is unavailable"}
+		return nil, []string{"application capture directory is unavailable"}
 	}
 	dir := service.captureDirectory
 	for label, save := range map[string]func() (string, error){

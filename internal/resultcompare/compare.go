@@ -1,5 +1,5 @@
-// Package resultcompare compares Gio and Wails disk-backed automation results
-// without depending on completion order, generated Fiery job IDs, or timing.
+// Package resultcompare compares baseline and candidate disk-backed automation
+// results without depending on completion order, generated Fiery job IDs, or timing.
 package resultcompare
 
 import (
@@ -28,13 +28,13 @@ type Difference struct {
 }
 
 type Report struct {
-	Equivalent       bool         `json:"equivalent"`
-	Gio              Summary      `json:"gio"`
-	Wails            Summary      `json:"wails"`
-	OnlyGioRecords   int          `json:"onlyGioRecords"`
-	OnlyWailsRecords int          `json:"onlyWailsRecords"`
-	OnlyGio          []Difference `json:"onlyGio,omitempty"`
-	OnlyWails        []Difference `json:"onlyWails,omitempty"`
+	Equivalent           bool         `json:"equivalent"`
+	Baseline             Summary      `json:"baseline"`
+	Candidate            Summary      `json:"candidate"`
+	OnlyBaselineRecords  int          `json:"onlyBaselineRecords"`
+	OnlyCandidateRecords int          `json:"onlyCandidateRecords"`
+	OnlyBaseline         []Difference `json:"onlyBaseline,omitempty"`
+	OnlyCandidate        []Difference `json:"onlyCandidate,omitempty"`
 }
 
 const maxDifferenceSamples = 100
@@ -59,37 +59,37 @@ type recordSet struct {
 	samples map[string]reportxlsx.Result
 }
 
-func Compare(gioPath, wailsPath string) (Report, error) {
-	gio, err := read(gioPath)
+func Compare(baselinePath, candidatePath string) (Report, error) {
+	baseline, err := read(baselinePath)
 	if err != nil {
-		return Report{}, fmt.Errorf("read Gio results: %w", err)
+		return Report{}, fmt.Errorf("read baseline results: %w", err)
 	}
-	wails, err := read(wailsPath)
+	candidate, err := read(candidatePath)
 	if err != nil {
-		return Report{}, fmt.Errorf("read Wails results: %w", err)
+		return Report{}, fmt.Errorf("read candidate results: %w", err)
 	}
-	report := Report{Gio: gio.summary, Wails: wails.summary}
-	for digest, gioCount := range gio.counts {
-		if difference := gioCount - wails.counts[digest]; difference > 0 {
-			report.OnlyGioRecords += difference
-			report.OnlyGio = append(report.OnlyGio, Difference{Digest: digest, Count: difference, Sample: gio.samples[digest]})
+	report := Report{Baseline: baseline.summary, Candidate: candidate.summary}
+	for digest, baselineCount := range baseline.counts {
+		if difference := baselineCount - candidate.counts[digest]; difference > 0 {
+			report.OnlyBaselineRecords += difference
+			report.OnlyBaseline = append(report.OnlyBaseline, Difference{Digest: digest, Count: difference, Sample: baseline.samples[digest]})
 		}
 	}
-	for digest, wailsCount := range wails.counts {
-		if difference := wailsCount - gio.counts[digest]; difference > 0 {
-			report.OnlyWailsRecords += difference
-			report.OnlyWails = append(report.OnlyWails, Difference{Digest: digest, Count: difference, Sample: wails.samples[digest]})
+	for digest, candidateCount := range candidate.counts {
+		if difference := candidateCount - baseline.counts[digest]; difference > 0 {
+			report.OnlyCandidateRecords += difference
+			report.OnlyCandidate = append(report.OnlyCandidate, Difference{Digest: digest, Count: difference, Sample: candidate.samples[digest]})
 		}
 	}
-	sort.Slice(report.OnlyGio, func(i, j int) bool { return report.OnlyGio[i].Digest < report.OnlyGio[j].Digest })
-	sort.Slice(report.OnlyWails, func(i, j int) bool { return report.OnlyWails[i].Digest < report.OnlyWails[j].Digest })
-	if len(report.OnlyGio) > maxDifferenceSamples {
-		report.OnlyGio = report.OnlyGio[:maxDifferenceSamples]
+	sort.Slice(report.OnlyBaseline, func(i, j int) bool { return report.OnlyBaseline[i].Digest < report.OnlyBaseline[j].Digest })
+	sort.Slice(report.OnlyCandidate, func(i, j int) bool { return report.OnlyCandidate[i].Digest < report.OnlyCandidate[j].Digest })
+	if len(report.OnlyBaseline) > maxDifferenceSamples {
+		report.OnlyBaseline = report.OnlyBaseline[:maxDifferenceSamples]
 	}
-	if len(report.OnlyWails) > maxDifferenceSamples {
-		report.OnlyWails = report.OnlyWails[:maxDifferenceSamples]
+	if len(report.OnlyCandidate) > maxDifferenceSamples {
+		report.OnlyCandidate = report.OnlyCandidate[:maxDifferenceSamples]
 	}
-	report.Equivalent = report.OnlyGioRecords == 0 && report.OnlyWailsRecords == 0
+	report.Equivalent = report.OnlyBaselineRecords == 0 && report.OnlyCandidateRecords == 0
 	return report, nil
 }
 

@@ -285,7 +285,7 @@ func (service *Service) presetStore() (*presets.Store, error) {
 		return service.presets, nil
 	}
 	if service.dataDirectory == "" {
-		return nil, errors.New("preview configuration directory is unavailable")
+		return nil, errors.New("application configuration directory is unavailable")
 	}
 	store, err := presets.New(filepath.Join(service.dataDirectory, "presets.json"))
 	if err != nil {
@@ -316,11 +316,13 @@ func runModesByLabel(labels []string) []core.RunMode {
 	return result
 }
 
-func previewDataDirectory() (string, error) {
+func applicationDataDirectory() (string, error) {
 	config, err := os.UserConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("locate preview configuration directory: %w", err)
+		return "", fmt.Errorf("locate application configuration directory: %w", err)
 	}
+	// Retain the accepted Wails data identity so existing presets and result
+	// history remain available after promotion to the sole desktop shell.
 	return filepath.Join(config, "API Automation Wails Preview"), nil
 }
 

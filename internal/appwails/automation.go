@@ -140,7 +140,7 @@ func (service *Service) StartAutomation(input AutomationInput) (AutomationState,
 		}
 	}
 	started := time.Now()
-	resultDir, err := service.previewResultDirectory()
+	resultDir, err := service.resultDirectory()
 	if err != nil {
 		return AutomationState{}, err
 	}
@@ -353,9 +353,9 @@ func capabilityLabels(capability capabilitiesModel) map[string]string {
 	return labels
 }
 
-func (service *Service) previewResultDirectory() (string, error) {
+func (service *Service) resultDirectory() (string, error) {
 	if service.dataDirectory == "" {
-		return "", errors.New("preview result directory is unavailable")
+		return "", errors.New("application result directory is unavailable")
 	}
 	return filepath.Join(service.dataDirectory, "results"), nil
 }

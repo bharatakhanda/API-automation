@@ -10,15 +10,15 @@ import (
 )
 
 func main() {
-	gioPath := flag.String("gio", "", "path to the Gio automation JSONL result store")
-	wailsPath := flag.String("wails", "", "path to the Wails automation JSONL result store")
+	baselinePath := flag.String("baseline", "", "path to the baseline automation JSONL result store")
+	candidatePath := flag.String("candidate", "", "path to the candidate automation JSONL result store")
 	flag.Parse()
-	if *gioPath == "" || *wailsPath == "" {
-		fmt.Fprintln(os.Stderr, "both -gio and -wails result paths are required")
+	if *baselinePath == "" || *candidatePath == "" {
+		fmt.Fprintln(os.Stderr, "both -baseline and -candidate result paths are required")
 		flag.Usage()
 		os.Exit(2)
 	}
-	report, err := resultcompare.Compare(*gioPath, *wailsPath)
+	report, err := resultcompare.Compare(*baselinePath, *candidatePath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)

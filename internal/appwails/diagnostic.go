@@ -23,12 +23,12 @@ func newDiagnosticLog(dataDirectory string) *diagnosticLog {
 	if os.MkdirAll(dir, 0o700) != nil {
 		return &diagnosticLog{}
 	}
-	path := filepath.Join(dir, "api-automation-wails-"+time.Now().Format("20060102-150405")+".log")
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	prefix := fmt.Sprintf("api-automation-wails-%s-%d-", time.Now().Format("20060102-150405.000000000"), os.Getpid())
+	file, err := os.CreateTemp(dir, prefix+"*.log")
 	if err != nil {
 		return &diagnosticLog{}
 	}
-	return &diagnosticLog{file: file, path: path}
+	return &diagnosticLog{file: file, path: file.Name()}
 }
 
 func (log *diagnosticLog) Path() string {

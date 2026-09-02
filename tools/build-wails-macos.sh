@@ -5,7 +5,7 @@ set +x
 root="$(cd "$(dirname "$0")/.." && pwd)"
 expected_wails="v3.0.0-beta.16"
 arch="$(go env GOARCH)"
-output="$root/dist/api-automation-wails-preview-$arch"
+output="$root/dist/api-automation-$arch"
 secret="${API_AUTOMATION_SECRET_KEY:-}"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -25,12 +25,12 @@ if [[ "$(wails3 version 2>&1)" != "$expected_wails" ]]; then
     exit 1
 fi
 
-cd "$root/cmd/api-automation-wails/frontend"
+cd "$root/cmd/api-automation/frontend"
 npm ci --ignore-scripts
 npm audit --package-lock-only
 node --check src/app.js
 node --check build.mjs
-wails3 generate bindings -b -names -d src/bindings "$root/cmd/api-automation-wails"
+wails3 generate bindings -b -names -d src/bindings "$root/cmd/api-automation"
 npm run build
 
 SECRET_TO_SCAN="$secret" python3 - <<'PY'
@@ -46,7 +46,7 @@ PY
 mkdir -p "$root/dist"
 ldflags="-s -w -X api-automation/internal/fiery.DefaultSecretKey=$secret"
 cd "$root"
-go build -tags production -trimpath -ldflags "$ldflags" -o "$output" ./cmd/api-automation-wails
+go build -tags production -trimpath -ldflags "$ldflags" -o "$output" ./cmd/api-automation
 
 BUILT_BINARY="$output" SECRET_TO_SCAN="$secret" python3 - <<'PY'
 import os
@@ -61,4 +61,4 @@ file "$output"
 shasum -a 256 "$output" > "$output.sha256"
 secret=""
 ldflags=""
-echo "Wails macOS native build: PASS; architecture=$arch; output=$output"
+echo "Wails macOS application build: PASS; architecture=$arch; output=$output"
