@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"api-automation/internal/application"
 	"api-automation/internal/capabilities"
 	"api-automation/internal/combinations"
 	"api-automation/internal/fiery"
@@ -84,7 +85,7 @@ func TestWorkspaceNavigationSeparatesOperationalPages(t *testing.T) {
 	if window.activePage != pageConnection {
 		t.Fatalf("connection gate allowed page %d before approval", window.activePage)
 	}
-	window.hasActiveServer = true
+	window.connectionState = application.NewConnectionStateWithActive("", model.ServerConnection{IPAddress: "fiery.example"})
 	window.activePage = pageResults
 	window.list.Position.Offset = 42
 	window.setActivePage(pageLogs)
@@ -95,8 +96,7 @@ func TestWorkspaceNavigationSeparatesOperationalPages(t *testing.T) {
 
 func TestExistingCredentialsStayOutOfConnectionEditors(t *testing.T) {
 	window := &Window{
-		activeServer:    model.ServerConnection{IPAddress: "fiery.example", SecretKey: "configured-key", Password: "configured-password"},
-		hasActiveServer: true,
+		connectionState: application.NewConnectionStateWithActive("", model.ServerConnection{IPAddress: "fiery.example", SecretKey: "configured-key", Password: "configured-password"}),
 		activePage:      pageOverview,
 	}
 	window.secretKey.SetText("stale editor value")

@@ -22,10 +22,11 @@ const (
 func (w *Window) administrationCard(gtx layout.Context) layout.Dimensions {
 	w.mu.Lock()
 	adminStatus := w.adminStatus
-	inventoryServer := w.adminInventoryServer
-	inventoryAt := w.adminInventoryAt
-	jobCount := w.adminJobCount
 	w.mu.Unlock()
+	inventorySnapshot := w.administrationBackend().Inventory()
+	inventoryServer := inventorySnapshot.Server
+	inventoryAt := inventorySnapshot.Inspected
+	jobCount := inventorySnapshot.Count
 
 	inventory := "Not inspected"
 	if inventoryServer != "" && !inventoryAt.IsZero() {
@@ -306,30 +307,17 @@ func (w *Window) administrationBackend() *application.AdministrationState {
 	defer w.mu.Unlock()
 	if w.adminState == nil {
 		w.adminState = new(application.AdministrationState)
-		if w.adminInventoryServer != "" && !w.adminInventoryAt.IsZero() {
-			w.adminState.RecordInventory(w.adminInventoryServer, w.adminJobCount, w.adminInventoryAt)
-		}
 	}
 	return w.adminState
 }
 
 func (w *Window) recordJobInventory(server string, count int) {
-	snapshot := w.administrationBackend().RecordInventory(server, count, time.Now())
-	w.mu.Lock()
-	w.adminInventoryServer = snapshot.Server
-	w.adminInventoryAt = snapshot.Inspected
-	w.adminJobCount = snapshot.Count
-	w.mu.Unlock()
+	w.administrationBackend().RecordInventory(server, count, time.Now())
 	w.invalidate()
 }
 
 func (w *Window) invalidateJobInventory() {
 	w.administrationBackend().InvalidateInventory()
-	w.mu.Lock()
-	w.adminInventoryServer = ""
-	w.adminInventoryAt = time.Time{}
-	w.adminJobCount = 0
-	w.mu.Unlock()
 }
 
 func newFieryClient(server model.ServerConnection) (*fiery.Client, error) {

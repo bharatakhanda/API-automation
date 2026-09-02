@@ -191,6 +191,8 @@ Deliverables:
 
 Exit gate: Gio is still the production application, but all Wails-required use cases are available through platform-neutral services.
 
+Status (2026-09-02): complete. Temporary Gio connection and administration mirrors were removed, leaving `application.ConnectionState` and `application.AdministrationState` authoritative. All automated/race/static/security/Darwin compile gates pass, and the secret-injected Gio executable passes Windows startup, no-shell-child, and graceful-close smoke testing. The reusable live Fiery and future side-by-side checklist is `docs/wails3-regression-checklist.md`; Fiery-dependent rows remain explicitly pending until the target server, credentials, approved files, and isolated destructive-test environment are available. The integrated checkpoint is merged to `main` and tagged `wails-core-extracted-20260902` before any Wails dependency or code is added.
+
 ### Stage 5 — Wails 3 shell
 
 Branch from updated `main`: `feature/wails3-ui`

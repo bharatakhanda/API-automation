@@ -149,17 +149,13 @@ type Window struct {
 	modeChecks                                             []widget.Bool
 	fileModeGroup                                          widget.Enum
 
-	activePage          int
-	strategy            combinations.Strategy
-	valueSource         automationValueSource
-	testIntent          automationTestIntent
-	constraintMode      constraintTestMode
-	serverPresetGroup   widget.Enum
-	activeServer        model.ServerConnection // compatibility mirror; application state is authoritative
-	hasActiveServer     bool                   // compatibility mirror for existing Gio rendering/tests
-	configuredSecret    string
-	testedConnectionKey string // compatibility mirror retained through core extraction
-	connectionState     *application.ConnectionState
+	activePage        int
+	strategy          combinations.Strategy
+	valueSource       automationValueSource
+	testIntent        automationTestIntent
+	constraintMode    constraintTestMode
+	serverPresetGroup widget.Enum
+	connectionState   *application.ConnectionState
 
 	capabilities          capabilities.Model
 	selected              map[string]map[string]*widget.Bool
@@ -186,8 +182,6 @@ type Window struct {
 	failedCount           int
 	errorCount            int
 	status                string
-	serverTestStatus      string
-	serverTestOK          bool
 	healthStatus          string
 	healthDetail          string
 	healthCheckedAt       time.Time
@@ -211,9 +205,6 @@ type Window struct {
 	lastRun               reportxlsx.Summary
 	adminStatus           string
 	adminState            *application.AdministrationState
-	adminInventoryServer  string
-	adminInventoryAt      time.Time
-	adminJobCount         int
 }
 
 type resultRow struct{ JobID, JobName, Result, Duration, Status, State, Detail string }
@@ -273,12 +264,11 @@ func New() *Window {
 		strategy: combinations.StrategySingle, valueSource: valueSourceSelected,
 		testIntent: testIntentPositive, constraintMode: constraintValidationOnly,
 		activeCapabilityGroup: "Job Info", activePage: pageConnection,
-		configuredSecret: fiery.DefaultSecretKey,
-		connectionState:  application.NewConnectionState(fiery.DefaultSecretKey),
-		healthGuard:      new(application.GenerationGuard),
-		capabilityGuard:  new(application.GenerationGuard),
-		adminState:       new(application.AdministrationState),
-		status:           "Test and approve a server connection to begin.", diagnostic: newDiagnosticLog(),
+		connectionState: application.NewConnectionState(fiery.DefaultSecretKey),
+		healthGuard:     new(application.GenerationGuard),
+		capabilityGuard: new(application.GenerationGuard),
+		adminState:      new(application.AdministrationState),
+		status:          "Test and approve a server connection to begin.", diagnostic: newDiagnosticLog(),
 		appContext: appContext, appCancel: appCancel,
 	}
 	w.theme.Palette = material.Palette{Bg: palette.bg, Fg: palette.text, ContrastBg: palette.primary, ContrastFg: rgb(0xffffff)}
@@ -312,7 +302,6 @@ func New() *Window {
 	if len(w.modeChecks) > 0 {
 		w.modeChecks[0].Value = true
 	}
-	w.serverTestStatus = "Not tested"
 	w.healthStatus = "Not checked"
 	w.adminStatus = "No administrative action is in progress."
 	w.window.Option(app.Title("API Automation"), app.Size(unit.Dp(1180), unit.Dp(820)), app.MinSize(unit.Dp(1024), unit.Dp(700)))
@@ -628,11 +617,6 @@ func (w *Window) resetSelections() {
 	w.jobActionID.SetText("")
 	w.adminConfirmation.SetText("")
 	w.administrationBackend().InvalidateInventory()
-	w.mu.Lock()
-	w.adminInventoryServer = ""
-	w.adminInventoryAt = time.Time{}
-	w.adminJobCount = 0
-	w.mu.Unlock()
 	w.setStatus("Selections reset to defaults. Server details, discovered capabilities, and file paths were preserved.")
 	w.addLog("Reset capability selections, Copies, custom page range, strategy, run modes, parallel jobs, and case limit to defaults")
 }
@@ -641,9 +625,7 @@ func (w *Window) setActivePage(page int) {
 	if page < 0 || page >= len(workspacePages) || page == w.activePage {
 		return
 	}
-	w.mu.Lock()
-	connected := w.hasActiveServer
-	w.mu.Unlock()
+	connected := w.connectionBackend().Snapshot().HasActive
 	if !connected && page != pageConnection {
 		w.setStatus("Test the server connection and press OK before opening other pages.")
 		return
@@ -1328,7 +1310,6 @@ func (w *Window) testServerConnection() {
 		return
 	}
 	w.connectionBackend().BeginTest()
-	w.syncConnectionMirror()
 	if !w.testingServer.CompareAndSwap(false, true) {
 		return
 	}
@@ -1341,7 +1322,6 @@ func (w *Window) testServerConnection() {
 		client, err := fiery.New(fiery.Config{ServerIP: server.IPAddress, SecretKey: server.SecretKey, Password: server.Password, InsecureTLS: true})
 		if err != nil {
 			w.connectionBackend().CompleteTest(server, false, "Connection failed")
-			w.syncConnectionMirror()
 			w.setServerTestStatus("Connection failed")
 			w.setStatus("Server test failed: " + err.Error())
 			w.addLog("Server connection test failed: %v", err)
@@ -1349,14 +1329,12 @@ func (w *Window) testServerConnection() {
 		}
 		if _, err := client.Login(ctx); err != nil {
 			w.connectionBackend().CompleteTest(server, false, "Authentication failed")
-			w.syncConnectionMirror()
 			w.setServerTestStatus("Authentication failed")
 			w.setStatus("Server test failed: " + err.Error())
 			w.addLog("Server connection test failed: %v", err)
 			return
 		}
 		w.connectionBackend().CompleteTest(server, true, "Connection OK · press OK to apply")
-		w.syncConnectionMirror()
 		w.setServerTestStatus("Connection OK · press OK to apply")
 		w.setStatus("Server connection passed. Press OK to use this connection.")
 		w.addLog("Server connection test passed for %s", server.IPAddress)
@@ -2493,7 +2471,6 @@ func (w *Window) setStatus(s string) {
 
 func (w *Window) setServerTestStatus(s string) {
 	w.connectionBackend().SetTestStatus(s)
-	w.syncConnectionMirror()
 	w.diagnostic.printf("SERVER_TEST: %s", s)
 	w.invalidate()
 }

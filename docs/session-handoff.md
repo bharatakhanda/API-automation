@@ -7,8 +7,8 @@ Updated: 2026-09-02
 - Root: `C:\Users\harsh\Desktop\API_Automation`
 - Repository: `https://github.com/bharatakhanda/API-automation`
 - Stable branch: `main`
-- Active branch: `refactor/platform-neutral-core`
-- Stable baseline tag: `gio-stable-20260902`
+- Active branch: `main`
+- Stable baseline tags: `gio-stable-20260902` and `wails-core-extracted-20260902`
 - Built EXE: `C:\Users\harsh\Desktop\API_Automation\bin\api-automation.exe`
 - Do not commit or push `DATA/`, `.local/`, captures, logs, result files, executables, or secrets.
 - The user has explicitly authorized logical commits and pushes throughout the backend extraction and Wails 3 introduction. Report after each completed stage with pending work and the next task.
@@ -16,11 +16,11 @@ Updated: 2026-09-02
 
 ## Git state at handoff
 
-- `main` and `origin/main` include `23b50dc`; generated executables, captures, logs, results, `.local/`, and secrets remain excluded.
-- `gio-stable-20260902` marks the validated rollback point before platform-neutral core extraction.
+- `main` and `origin/main` include the integrated platform-neutral core; generated executables, captures, logs, results, `.local/`, and secrets remain excluded.
+- `gio-stable-20260902` marks the rollback point before extraction; `wails-core-extracted-20260902` marks the validated Gio checkpoint before introducing Wails.
 - Latest implementation work fixes custom-range planning so non-empty text cannot silently send bare `Range1`, and combines `/status` with captured plus bounded recent-job workload evidence so externally started jobs show Busy.
 - Wails migration architecture, invariants, stage gates, beta risk, and rollback policy are recorded in `docs/wails3-migration-plan.md`.
-- Stages 1 through 3 are complete: platform-neutral planning, execution, lifecycle/readback, typed events, connection state, monitoring policy/generation guards, preset mapping, and administration safeguards now live under `internal/application`; Gio remains the production adapter and fallback.
+- Stages 1 through 4 are complete: platform-neutral planning, execution, lifecycle/readback, typed events, connection state, monitoring policy/generation guards, preset mapping, and administration safeguards now live under `internal/application`; temporary connection/administration mirrors are removed and Gio remains the production adapter and fallback.
 - Implementation commits:
   - `1d4044a feat: add categorized constraint-aware capability metadata`
   - `c6f2a3e feat: add secure local settings preset store`
@@ -31,6 +31,9 @@ Updated: 2026-09-02
   - `ab656bd feat: tighten Fiery capability filtering and diagnostics`
   - `4b0c1fd feat: improve Fiery workspace automation and live status`
   - `23b50dc fix: honor custom ranges and external Fiery workload`
+  - `e56aa97 refactor: extract platform-neutral planning core`
+  - `49d6ddd refactor: extract automation execution runner`
+  - `2c443cf refactor: extract application state and safeguards`
 - The complete stable history and baseline tag are pushed to `origin`.
 
 ## Current implementation
@@ -110,7 +113,7 @@ Updated: 2026-09-02
 
 ## Validation
 
-The following passed again after the Stage 3 state, monitoring, preset, and administration extraction:
+The following passed again at the Stage 4 extracted-core integration checkpoint:
 
 - `gofmt -w internal`
 - `go test ./...`
@@ -127,9 +130,11 @@ The following passed again after the Stage 3 state, monitoring, preset, and admi
 - Embedded-secret byte verification without printing the key
 - GUI startup smoke test, no `cmd`/`curl`/PowerShell child process, graceful `WM_CLOSE`, exit code 0
 
-Stage 3 secret-injected GUI checkpoint (Windows GUI subsystem 2, 17,337,856 bytes; UTC build timestamp `2026-09-02T05:57:10.0508582Z`) SHA-256:
+Stage 4 secret-injected GUI checkpoint (Windows GUI subsystem 2, 17,332,224 bytes; UTC build timestamp `2026-09-02T06:03:44.4838064Z`) SHA-256:
 
-`8914D0C83F7AF6A88616773ACC2C9FA643F76FE46E2663B50D3A864970ACB019`
+`D6A827158F0D4CC42CC336544CE625C211550D5AD3C19167EDE658E4249BB2BC`
+
+Stage 3 checkpoint SHA-256: `8914D0C83F7AF6A88616773ACC2C9FA643F76FE46E2663B50D3A864970ACB019`
 
 Stage 2 checkpoint SHA-256: `52585D12DCC4D948EFD295994FF48DE4FF99291AD6A76006777AE53531E09A87`
 
@@ -151,10 +156,10 @@ Stable rollback executable SHA-256 remains:
 ## Wails 3 migration status
 
 - Wails 3 is currently available as beta through `v3.0.0-beta.16`, not a GA release. It will be pinned exactly and introduced only after backend extraction.
-- `refactor/platform-neutral-core` is the active implementation branch. Gio remains the production shell and must pass every extraction gate.
-- The target is a platform-neutral `internal/application` layer, followed by a separate `feature/wails3-ui` branch and side-by-side Windows parity before macOS packaging.
-- Stages 1 through 3 are complete and validated. Stage 4 is next: remove temporary compatibility mirrors, run the extracted-core integration gate, merge to `main`, tag the checkpoint, and push.
-- Full sequencing and verification requirements are in `docs/wails3-migration-plan.md`.
+- The platform-neutral core is integrated on `main`; Gio remains the production shell and validated fallback.
+- Stage 5 starts on a separate `feature/wails3-ui` branch, followed by side-by-side Windows parity before macOS packaging.
+- Stages 1 through 4 are complete and validated. Stage 5 is next: pin Wails `v3.0.0-beta.16`, add a distinct preview command/data identity, and implement shutdown, navigation, connection, Overview, and read-only capabilities without enabling mutations.
+- Full sequencing and verification requirements are in `docs/wails3-migration-plan.md`; reusable automated/live parity evidence is in `docs/wails3-regression-checklist.md`.
 
 ## Recommended live validation
 

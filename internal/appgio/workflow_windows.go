@@ -27,29 +27,9 @@ func (w *Window) connectionBackend() *application.ConnectionState {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.connectionState == nil {
-		if w.hasActiveServer {
-			w.connectionState = application.NewConnectionStateWithActive(w.configuredSecret, w.activeServer)
-		} else {
-			w.connectionState = application.NewConnectionState(w.configuredSecret)
-		}
+		w.connectionState = application.NewConnectionState(fiery.DefaultSecretKey)
 	}
 	return w.connectionState
-}
-
-func (w *Window) syncConnectionMirror() {
-	state := w.connectionBackend()
-	active, hasActive := state.Active()
-	snapshot := state.Snapshot()
-	w.mu.Lock()
-	w.activeServer = active
-	w.hasActiveServer = hasActive
-	w.serverTestOK = snapshot.TestOK
-	w.serverTestStatus = snapshot.TestStatus
-	w.testedConnectionKey = ""
-	if snapshot.TestOK {
-		w.testedConnectionKey = application.ConnectionKey(state.ResolveDraft(active))
-	}
-	w.mu.Unlock()
 }
 
 func (w *Window) draftConnectionUnchecked() model.ServerConnection {
@@ -61,9 +41,7 @@ func (w *Window) draftConnectionUnchecked() model.ServerConnection {
 }
 
 func (w *Window) invalidateChangedConnectionTest() {
-	if w.connectionBackend().InvalidateIfChanged(w.draftConnectionUnchecked()) {
-		w.syncConnectionMirror()
-	}
+	w.connectionBackend().InvalidateIfChanged(w.draftConnectionUnchecked())
 }
 
 func (w *Window) applyTestedConnection() {
@@ -83,7 +61,6 @@ func (w *Window) applyTestedConnection() {
 	if changed {
 		w.invalidateServerDependentState()
 	}
-	w.syncConnectionMirror()
 	w.mu.Lock()
 	w.healthStatus = "Checking"
 	w.healthDetail = "Waiting for the first lightweight status check."
@@ -103,14 +80,12 @@ func (w *Window) beginConnectionChange() {
 		w.secretKey.SetText("")
 		w.password.SetText("")
 	}
-	w.syncConnectionMirror()
 	w.setActivePage(pageConnection)
 	w.setStatus("Current connection remains active until replacement details pass testing and you press OK.")
 }
 
 func (w *Window) cancelConnectionChange() {
 	server, ok := w.connectionBackend().CancelChange()
-	w.syncConnectionMirror()
 	if !ok {
 		return
 	}
@@ -132,9 +107,6 @@ func (w *Window) invalidateServerDependentState() {
 	if w.adminState != nil {
 		w.adminState.InvalidateInventory()
 	}
-	w.adminInventoryServer = ""
-	w.adminInventoryAt = time.Time{}
-	w.adminJobCount = 0
 	w.healthStatus = "Not checked"
 	w.healthDetail = ""
 	w.healthCheckedAt = time.Time{}
@@ -158,9 +130,7 @@ func (w *Window) workflowSidebar(gtx layout.Context) layout.Dimensions {
 		if len(w.navButtons) != len(workspacePages) {
 			w.navButtons = make([]widget.Clickable, len(workspacePages))
 		}
-		w.mu.Lock()
-		connected := w.hasActiveServer
-		w.mu.Unlock()
+		connected := w.connectionBackend().Snapshot().HasActive
 		children := []layout.FlexChild{
 			layout.Rigid(label(w.theme, "API Automation", 20, rgb(0xffffff)).Layout),
 			layout.Rigid(spacer(24)),
@@ -260,14 +230,13 @@ func (w *Window) workflowHeader(gtx layout.Context) layout.Dimensions {
 }
 
 func (w *Window) connectionPage(gtx layout.Context) layout.Dimensions {
-	w.mu.Lock()
-	testStatus := w.serverTestStatus
-	testOK := w.serverTestOK
-	hasActive := w.hasActiveServer
-	activeIP := w.activeServer.IPAddress
-	secretConfigured := w.configuredSecret != "" || (hasActive && w.activeServer.SecretKey != "")
-	passwordConfigured := hasActive && w.activeServer.Password != ""
-	w.mu.Unlock()
+	connection := w.connectionBackend().Snapshot()
+	testStatus := connection.TestStatus
+	testOK := connection.TestOK
+	hasActive := connection.HasActive
+	activeIP := connection.ActiveIPAddress
+	secretConfigured := connection.SecretConfigured
+	passwordConfigured := connection.PasswordConfigured
 	secretTitle, secretHint := "Secret / API key replacement", "Required"
 	if secretConfigured {
 		secretTitle, secretHint = "Secret / API key · Configured", "Leave blank to keep the configured key, or enter a replacement"
@@ -314,8 +283,8 @@ func (w *Window) connectionPage(gtx layout.Context) layout.Dimensions {
 
 func (w *Window) overviewPage(gtx layout.Context) layout.Dimensions {
 	automationActive := w.running.Load()
+	server, _ := w.connectionBackend().Active()
 	w.mu.Lock()
-	server := w.activeServer
 	capabilityModel := w.capabilities
 	healthStatus, healthDetail := w.healthStatus, w.healthDetail
 	healthAt, latency := w.healthCheckedAt, w.healthLatency
