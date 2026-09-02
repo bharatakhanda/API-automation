@@ -96,9 +96,40 @@ jobs:
           file "dist/api-automation-wails-preview-${{ matrix.arch }}"
           shasum -a 256 "dist/api-automation-wails-preview-${{ matrix.arch }}" > "dist/api-automation-wails-preview-${{ matrix.arch }}.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: api-automation-wails-macos-${{ matrix.arch }}-unsigned
           path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  universal-package:
+    name: universal unsigned package
+    needs: native-build
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: api-automation-wails-macos-*-unsigned
+          path: dist
+          merge-multiple: true
+
+      - name: Build universal application bundle
+        shell: bash
+        run: |
+          tools/package-wails-macos.sh 0.1.0 "$GITHUB_RUN_NUMBER"
+          plutil -lint "dist/API Automation Preview.app/Contents/Info.plist"
+          test "$(lipo -archs 'dist/API Automation Preview.app/Contents/MacOS/api-automation-wails-preview')" = "x86_64 arm64" || \
+            test "$(lipo -archs 'dist/API Automation Preview.app/Contents/MacOS/api-automation-wails-preview')" = "arm64 x86_64"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: api-automation-wails-macos-universal-unsigned
+          path: |
+            dist/api-automation-wails-preview-macos-universal.zip
+            dist/api-automation-wails-preview-macos-universal.zip.sha256
           if-no-files-found: error
           retention-days: 14

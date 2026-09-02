@@ -238,6 +238,8 @@ Deliverables:
 
 Exit gate: signed/notarized field candidate passes the same backend parity suite and Mac-specific smoke tests.
 
+Status (2026-09-02): native compilation and unsigned packaging are automated by `.github/workflows/wails-macos-preview.yml`. GitHub Actions run `33602198059` passed backend/frontend/binding gates and produced native arm64 (`076c913925d40dae824667f09a1bc2400e83615bd1a9f2aab0812a4d9383a72e`) and x86_64 (`aa4b479af1208646ad3508cf9d73e4e25e0277f7536180e654f9a86ad5b741c0`) Mach-O artifacts. `tools/package-wails-macos.sh` now creates the universal `.app`/ZIP and supports hardened-runtime Developer ID signing plus `notarytool` submission/stapling. Architecture, bundle identity, minimum OS, credential/data policy, and interactive gates are fixed in `docs/wails3-macos-release.md`. The signed/notarized artifact and interactive Fiery/UI/wake-sleep/large-export checks remain pending Apple credentials, physical Macs, and the operator environment.
+
 ### Stage 8 — Adoption and Gio retirement decision
 
 - Release Wails as preview/beta beside Gio.

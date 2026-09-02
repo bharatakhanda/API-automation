@@ -45,7 +45,7 @@ go build -trimpath -ldflags "-s -w -H=windowsgui" -o bin/api-automation.exe ./cm
 .\.local\gui-smoke-test.ps1 -ExePath '.\bin\api-automation-wails-preview.exe'
 ```
 
-The Wails runtime and CLI are pinned to `v3.0.0-beta.16`; verify/install the CLI with `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16`. The preview has a distinct name, command, executable, data directory, and frontend lockfile. It now exposes mutation workflows through the shared backend, but remains a preview until the controlled live parity checklist is approved; use Gio as the production fallback.
+The Wails runtime and CLI are pinned to `v3.0.0-beta.16`; verify/install the CLI with `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16`. The preview has a distinct name, command, executable, data directory, and frontend lockfile. It now exposes mutation workflows through the shared backend, but remains a preview until the controlled live parity checklist is approved; use Gio as the production fallback. Native universal macOS build, signing, and acceptance gates are documented in `docs/wails3-macos-release.md`.
 
 `internal/fiery.DefaultSecretKey` is empty in source. If a field build needs a default key, inject it with `-ldflags -X` from ignored local secret storage. Never commit credentials, `.local/`, `DATA/`, generated captures, logs, or executables.
 

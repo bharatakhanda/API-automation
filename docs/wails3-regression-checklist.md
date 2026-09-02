@@ -55,6 +55,14 @@ These checks require the operator's target server, credentials, approved files, 
 - [ ] Inspect job inventory and confirm expiry/server changes invalidate it.
 - [ ] With disposable jobs and explicit destructive-operation approval only, enter exact `CLEAR ALL JOBS`, verify count revalidation, and confirm empty inventory.
 
+## macOS gate
+
+- [x] Build the Wails shell natively on Apple Silicon and Intel macOS runners; do not treat a Windows cross-build as a release gate.
+- [x] Compile the platform-neutral packages for Darwin ARM64 from Windows as an additional portability check.
+- [x] Choose universal `arm64` + `x86_64` packaging with a distinct preview bundle identity and declared macOS 13 minimum.
+- [ ] Validate Application Support paths, in-memory-only credential handling, Fiery TLS, file/folder permissions, cancellation, wake/sleep, and large exports on physical Macs.
+- [ ] Sign with hardened runtime, notarize, install on a clean supported macOS account, and rerun parity smoke tests.
+
 ## Evidence status
 
 - Extracted Gio core automated gate: **PASS**
